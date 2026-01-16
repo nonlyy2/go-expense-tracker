@@ -1,6 +1,6 @@
 # Go Expense Tracker
 
-per project on Go
+pet project on Go
 
 ## Roadmap 🗺️
 
