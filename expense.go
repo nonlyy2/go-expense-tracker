@@ -50,3 +50,19 @@ func inputExpense() Expense {
 
 	return NewExpense(cat, am, comm)
 }
+
+func DeleteExpenseFromSlice(expenses []Expense, id int) ([]Expense, error) {
+	index := -1
+	for i, e := range expenses {
+		if e.ID == id {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		return expenses, fmt.Errorf("расход с ID %d не найден", id)
+	}
+
+	return append(expenses[:index], expenses[index+1:]...), nil
+}

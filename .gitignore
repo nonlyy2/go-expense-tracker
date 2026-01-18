@@ -17,3 +17,6 @@ vendor/
 
 # IDE settings (VS Code)
 .vscode/
+
+# Local data
+expenses.json
