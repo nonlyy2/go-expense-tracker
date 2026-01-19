@@ -5,9 +5,9 @@ pet project on Go
 ## Roadmap 🗺️
 
 ### Stage 1: CLI (Январь)
-- [ ] console utility to add expenses
-- [ ] store data in JSON
-- [ ] basic console task tracker interface 
+- [x] console utility to add expenses
+- [x] store data in JSON
+- [x] basic console task tracker interface
 
 ### Stage 2: Backend API (Февраль)
 - [ ] REST API
