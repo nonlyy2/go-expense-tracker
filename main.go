@@ -40,7 +40,7 @@ func main() {
 		switch choice {
 		case "1": // add expense
 			exp := inputExpense()
-			exp.ID = len(expenses) + 1
+			exp.ID = NextID(expenses)
 			expenses = append(expenses, exp)
 			SaveExpenses(expenses)
 			fmt.Println("✅ Запись добавлена!")
@@ -54,12 +54,8 @@ func main() {
 					e.ID, e.Date.Format("2006-01-02"), e.Amount, e.Category, e.Comment)
 			}
 		case "3": // sum of expenses
-			sum_amount := 0.00
-			fmt.Println("Сумма расходов: ")
-			for _, e := range expenses {
-				sum_amount += e.Amount
-			}
-			fmt.Printf("%.2f", sum_amount)
+			sum_amount := CalculateTotal(expenses)
+			fmt.Printf("Сумма расходов: %.2f\n", sum_amount)
 
 		case "4": // delete expense with id
 			fmt.Print("Введите ID расхода для удаления: ")

@@ -51,6 +51,24 @@ func inputExpense() Expense {
 	return NewExpense(cat, am, comm)
 }
 
+func CalculateTotal(expenses []Expense) float64 {
+	var total float64
+	for _, e := range expenses {
+		total += e.Amount
+	}
+	return total
+}
+
+func NextID(expenses []Expense) int {
+	maxid := 0
+	for _, e := range expenses {
+		if e.ID > maxid {
+			maxid = e.ID
+		}
+	}
+	return maxid + 1
+}
+
 func DeleteExpenseFromSlice(expenses []Expense, id int) ([]Expense, error) {
 	index := -1
 	for i, e := range expenses {
