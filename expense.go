@@ -69,6 +69,49 @@ func NextID(expenses []Expense) int {
 	return maxid + 1
 }
 
+func ScanInt() int {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		idStr, _ := reader.ReadString('\n')
+		idStr = strings.TrimSpace(idStr)
+		val, err := strconv.Atoi(idStr)
+		if err == nil {
+			return val
+		}
+		fmt.Print("Ошибка, введите число: ")
+	}
+}
+
+func ScanFloat() float64 {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		idStr, _ := reader.ReadString('\n')
+		idStr = strings.TrimSpace(idStr)
+		float, err := strconv.ParseFloat(idStr, 64)
+		if err == nil {
+			return float
+		}
+		fmt.Print("Ошибка, введите корректную сумму (например 450.50): ")
+	}
+}
+
+func ScanStr() string {
+	reader := bufio.NewReader(os.Stdin)
+	Str, _ := reader.ReadString('\n')
+	Str = strings.TrimSpace(Str)
+
+	return Str
+}
+
+func FindExpenseByID(expenses []Expense, id int) (*Expense, error) {
+	for i := range expenses {
+		if expenses[i].ID == id {
+			return &expenses[i], nil // return pointer to exact expense
+		}
+	}
+	return nil, fmt.Errorf("расход с ID %d не найден", id)
+}
+
 func DeleteExpenseFromSlice(expenses []Expense, id int) ([]Expense, error) {
 	index := -1
 	for i, e := range expenses {
@@ -79,7 +122,7 @@ func DeleteExpenseFromSlice(expenses []Expense, id int) ([]Expense, error) {
 	}
 
 	if index == -1 {
-		return expenses, fmt.Errorf("расход с ID %d не найден", id)
+		return expenses, fmt.Errorf("Расход с ID %d не найден", id)
 	}
 
 	return append(expenses[:index], expenses[index+1:]...), nil

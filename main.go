@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -23,11 +22,12 @@ func main() {
 	for {
 		// список выборов
 		fmt.Println("\nМеню:")
-		fmt.Println("1. Добавить расход")
-		fmt.Println("2. Показать все расходы")
-		fmt.Println("3. Сумма расходов")
-		fmt.Println("4. Удалить расход")
-		fmt.Println("5. Выход")
+		fmt.Println("  1. Добавить расход")
+		fmt.Println("  2. Показать все расходы")
+		fmt.Println("  3. Сумма расходов")
+		fmt.Println("  4. Обновить расход")
+		fmt.Println("  5. Удалить расход")
+		fmt.Println("  0. Выход")
 		fmt.Print("Выберите пункт (введите цифру): ")
 
 		choice, err := reader.ReadString('\n')
@@ -49,7 +49,7 @@ func main() {
 			fmt.Println("Твои расходы:\n------------------------------------------------")
 
 			for _, e := range expenses {
-				// e — это конкретная трата на текущем шаге цикла
+				// e — exact expense for each loop step
 				fmt.Printf("%d. [%s] %.2f ₸ — %s (%s)\n",
 					e.ID, e.Date.Format("2006-01-02"), e.Amount, e.Category, e.Comment)
 			}
@@ -57,27 +57,87 @@ func main() {
 			sum_amount := CalculateTotal(expenses)
 			fmt.Printf("Сумма расходов: %.2f\n", sum_amount)
 
-		case "4": // delete expense with id
-			fmt.Print("Введите ID расхода для удаления: ")
-			idStr, _ := reader.ReadString('\n')
-			idStr = strings.TrimSpace(idStr)
+		case "4": // update expense
+		innerLoop:
+			for {
+				fmt.Println("    Что хотите изменить?")
+				fmt.Println("      1. Категория")
+				fmt.Println("      2. Сумма расхода")
+				fmt.Println("      3. Доп. информация")
+				fmt.Println("      0. Назад в главное меню")
+				fmt.Print("Выберите пункт (введите цифру): ")
 
-			id, err := strconv.Atoi(idStr)
-			if err != nil {
-				fmt.Println("Ошибка: введите числовой ID")
-				continue
+				choice, err := reader.ReadString('\n')
+				if err != nil {
+					fmt.Println("Ошибка ввода: ", err)
+					continue
+				}
+				choice = strings.TrimSpace(choice)
+
+				switch choice {
+				case "1": // update expense category
+					fmt.Print("Введите ID расхода: ")
+					id := ScanInt()
+					target, err := FindExpenseByID(expenses, id)
+
+					if err != nil {
+						fmt.Println("Ошибка:", err)
+						continue
+					}
+
+					fmt.Print("Введите новую категорию: ")
+					target.Category = ScanStr()
+
+				case "2": // update expense amount
+					fmt.Print("Введите ID расхода: ")
+					id := ScanInt()
+					target, err := FindExpenseByID(expenses, id)
+
+					if err != nil {
+						fmt.Println("Ошибка:", err)
+						continue
+					}
+
+					fmt.Print("Введите новую сумму: ")
+					target.Amount = ScanFloat()
+
+				case "3": // update expense comment
+					fmt.Print("Введите ID расхода: ")
+					id := ScanInt()
+					target, err := FindExpenseByID(expenses, id)
+
+					if err != nil {
+						fmt.Println("Ошибка:", err)
+						continue
+					}
+
+					fmt.Print("Введите новую доп. инфу: ")
+					target.Comment = ScanStr()
+
+				case "0": // выход в основной cli loop
+					break innerLoop
+
+				default: // other cases
+					fmt.Println("❌ Неверная команда, попробуй еще раз.")
+				}
+				SaveExpenses(expenses)
+				fmt.Println("Успешно обновлено!")
 			}
+
+		case "5": // delete expense with id
+			fmt.Print("Введите ID расхода для удаления: ")
+			id := ScanInt()
 
 			newExpenses, err := DeleteExpenseFromSlice(expenses, id)
 			if err != nil {
 				fmt.Println("Ошибка:", err)
 			} else {
-				expenses = newExpenses // update slice
-				SaveExpenses(expenses) // save file
+				expenses = newExpenses
+				SaveExpenses(expenses)
 				fmt.Println("Расход удален!")
 			}
 
-		case "5": // exit
+		case "0": // exit
 			fmt.Println("Пока!")
 			return
 
