@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "id": 1,
+    "date": "2026-01-21T19:26:49.024139+05:00",
+    "amount": 1450,
+    "category": "taxi",
+    "comment": "do dorma"
+  }
+]

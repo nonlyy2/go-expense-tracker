@@ -6,19 +6,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
+
+	"go-expense-tracker/internal/model"
+	"go-expense-tracker/internal/storage"
 )
 
-// Expense - это структура, описывающая одну трату
-type Expense struct {
-	ID       int       `json:"id"`
-	Date     time.Time `json:"date"`
-	Amount   float64   `json:"amount"`
-	Category string    `json:"category"`
-	Comment  string    `json:"comment"`
-}
-
-func RunMenu(expenses []Expense) {
+func RunMenu(expenses []model.Expense) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Добро пожаловать в Expense Tracker!")
 	for {
@@ -42,9 +35,11 @@ func RunMenu(expenses []Expense) {
 		switch choice {
 		case "1": // add expense
 			exp := inputExpense()
-			exp.ID = NextID(expenses)
+			exp.ID = model.NextID(expenses)
 			expenses = append(expenses, exp)
-			SaveExpenses(expenses)
+			if err := storage.SaveExpenses(expenses); err != nil {
+				fmt.Println("Ошибка сохранения:", err)
+			}
 			fmt.Println("✅ Запись добавлена!")
 
 		case "2": // show expenses
@@ -56,7 +51,7 @@ func RunMenu(expenses []Expense) {
 					e.ID, e.Date.Format("2006-01-02"), e.Amount, e.Category, e.Comment)
 			}
 		case "3": // sum of expenses
-			sum_amount := CalculateTotal(expenses)
+			sum_amount := model.CalculateTotal(expenses)
 			fmt.Printf("Сумма расходов: %.2f\n", sum_amount)
 
 		case "4": // update expense
@@ -80,7 +75,7 @@ func RunMenu(expenses []Expense) {
 				case "1": // update expense category
 					fmt.Print("Введите ID расхода: ")
 					id := ScanInt()
-					target, err := FindExpenseByID(expenses, id)
+					target, err := model.FindExpenseByID(expenses, id)
 
 					if err != nil {
 						fmt.Println("Ошибка:", err)
@@ -93,7 +88,7 @@ func RunMenu(expenses []Expense) {
 				case "2": // update expense amount
 					fmt.Print("Введите ID расхода: ")
 					id := ScanInt()
-					target, err := FindExpenseByID(expenses, id)
+					target, err := model.FindExpenseByID(expenses, id)
 
 					if err != nil {
 						fmt.Println("Ошибка:", err)
@@ -106,7 +101,7 @@ func RunMenu(expenses []Expense) {
 				case "3": // update expense comment
 					fmt.Print("Введите ID расхода: ")
 					id := ScanInt()
-					target, err := FindExpenseByID(expenses, id)
+					target, err := model.FindExpenseByID(expenses, id)
 
 					if err != nil {
 						fmt.Println("Ошибка:", err)
@@ -122,7 +117,7 @@ func RunMenu(expenses []Expense) {
 				default: // other cases
 					fmt.Println("❌ Неверная команда, попробуй еще раз.")
 				}
-				SaveExpenses(expenses)
+				storage.SaveExpenses(expenses)
 				fmt.Println("Успешно обновлено!")
 			}
 
@@ -130,12 +125,12 @@ func RunMenu(expenses []Expense) {
 			fmt.Print("Введите ID расхода для удаления: ")
 			id := ScanInt()
 
-			newExpenses, err := DeleteExpenseFromSlice(expenses, id)
+			newExpenses, err := model.DeleteExpenseFromSlice(expenses, id)
 			if err != nil {
 				fmt.Println("Ошибка:", err)
 			} else {
 				expenses = newExpenses
-				SaveExpenses(expenses)
+				storage.SaveExpenses(expenses)
 				fmt.Println("Расход удален!")
 			}
 
@@ -149,18 +144,7 @@ func RunMenu(expenses []Expense) {
 	}
 }
 
-func NewExpense(category string, amount float64, comment string) Expense {
-	newExpense := Expense{
-		ID:       1,
-		Date:     time.Now(),
-		Amount:   amount,
-		Category: category,
-		Comment:  comment,
-	}
-	return newExpense
-}
-
-func inputExpense() Expense {
+func inputExpense() model.Expense {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Введите категорию: ")
 	cat, _ := reader.ReadString('\n')
@@ -179,25 +163,7 @@ func inputExpense() Expense {
 	comm, _ := reader.ReadString('\n')
 	comm = strings.TrimSpace(comm)
 
-	return NewExpense(cat, am, comm)
-}
-
-func CalculateTotal(expenses []Expense) float64 {
-	var total float64
-	for _, e := range expenses {
-		total += e.Amount
-	}
-	return total
-}
-
-func NextID(expenses []Expense) int {
-	maxid := 0
-	for _, e := range expenses {
-		if e.ID > maxid {
-			maxid = e.ID
-		}
-	}
-	return maxid + 1
+	return model.NewExpense(cat, am, comm)
 }
 
 func ScanInt() int {
@@ -232,29 +198,4 @@ func ScanStr() string {
 	Str = strings.TrimSpace(Str)
 
 	return Str
-}
-
-func FindExpenseByID(expenses []Expense, id int) (*Expense, error) {
-	for i := range expenses {
-		if expenses[i].ID == id {
-			return &expenses[i], nil // return pointer to exact expense
-		}
-	}
-	return nil, fmt.Errorf("расход с ID %d не найден", id)
-}
-
-func DeleteExpenseFromSlice(expenses []Expense, id int) ([]Expense, error) {
-	index := -1
-	for i, e := range expenses {
-		if e.ID == id {
-			index = i
-			break
-		}
-	}
-
-	if index == -1 {
-		return expenses, fmt.Errorf("Расход с ID %d не найден", id)
-	}
-
-	return append(expenses[:index], expenses[index+1:]...), nil
 }

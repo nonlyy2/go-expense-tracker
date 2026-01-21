@@ -1,13 +1,14 @@
-package main
+package storage
 
 import (
 	"encoding/json"
+	"go-expense-tracker/internal/model"
 	"os"
 )
 
 const fileName = "expenses.json"
 
-func SaveExpenses(expenses []Expense) error {
+func SaveExpenses(expenses []model.Expense) error {
 	jsonData, err := json.MarshalIndent(expenses, "", "  ")
 	if err != nil {
 		return err
@@ -20,16 +21,16 @@ func SaveExpenses(expenses []Expense) error {
 	return nil
 }
 
-func LoadExpenses() ([]Expense, error) {
+func LoadExpenses() ([]model.Expense, error) {
 	data, err := os.ReadFile(fileName)
 
 	if os.IsNotExist(err) {
-		return []Expense{}, nil
+		return []model.Expense{}, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	var loaded []Expense
+	var loaded []model.Expense
 	err = json.Unmarshal(data, &loaded)
 	if err != nil {
 		return nil, err
