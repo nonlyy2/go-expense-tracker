@@ -9,14 +9,14 @@ func TestCalculateTotal(t *testing.T) {
 		expected float64
 	}{
 		{
-			name: "test expense",
+			name: "single expense",
 			input: []Expense{
 				{Amount: 450.00},
 			},
 			expected: 450.00,
 		},
 		{
-			name: "test expense",
+			name: "multiple expense",
 			input: []Expense{
 				{Amount: 450.00},
 				{Amount: 1530.00},
@@ -25,7 +25,7 @@ func TestCalculateTotal(t *testing.T) {
 			expected: 4640.00,
 		},
 		{
-			name:     "test expense",
+			name:     "empty list",
 			input:    []Expense{},
 			expected: 0.00,
 		},

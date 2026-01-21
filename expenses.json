@@ -12,5 +12,12 @@
     "amount": 2100,
     "category": "хавка",
     "comment": "донер"
+  },
+  {
+    "id": 3,
+    "date": "2026-01-21T18:23:44.165781+05:00",
+    "amount": 6790.6,
+    "category": "groceries",
+    "comment": "potatoes, onions, rice, tomato paste"
   }
 ]
