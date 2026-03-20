@@ -19,7 +19,7 @@ pet project on Go
 - [x] basic console task tracker interface
 
 ### Stage 2: Backend API (Февраль)
-- [ ] REST API
+- [x] REST API
 - [ ] SQLite/PostgreSQL
 - [ ] clear architecture
 
