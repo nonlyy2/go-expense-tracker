@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS expenses (
+    id SERIAL PRIMARY KEY,
+    date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    amount DECIMAL(12,2) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    comment TEXT DEFAULT ''
+);

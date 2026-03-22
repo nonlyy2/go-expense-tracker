@@ -179,111 +179,453 @@ DELETE /expenses/{id}             → удалить (HTMX partial response)
 
 ---
 
-### День 3: Авторизация (5-6 ч)
+### День 3: Авторизация — JWT + bcrypt (5-6 ч)
 
-**Цель:** Регистрация/логин по email+password, JWT в cookie, расходы привязаны к пользователю.
+**Цель:** Регистрация/логин по email+password. JWT в HttpOnly cookie. Каждый расход привязан к user_id. Без авторизации — 401.
 
-**Файлы:**
-- `internal/domain/user.go` — User entity
-- `internal/repository/user_repository.go` — интерфейс
-- `internal/repository/postgres/user_repo.go` — pgx-реализация
-- `migrations/000002_create_users.up.sql`
-- `migrations/000003_add_user_id_to_expenses.up.sql`
-- `internal/service/auth_service.go` — Register (bcrypt hash), Login (compare + JWT), VerifyToken
-- `internal/handler/api_auth.go` — POST /api/v1/auth/register, /api/v1/auth/login, /api/v1/auth/logout
-- `internal/middleware/auth.go` — RequireAuth middleware, извлекает userID из JWT cookie → context
+**Что изучить:** Как работает bcrypt (hash = salt + cost + digest, сравнение через `bcrypt.CompareHashAndPassword`), JWT (header.payload.signature, claim-ы sub/exp/iat), middleware chain в Go (функция принимает `http.Handler` и возвращает `http.Handler` — как decorator в Python или обёртка в C через function pointer).
 
-**Обновить CLI:** добавить команды login/register в меню, сохранять JWT cookie для последующих запросов
+**Зависимости:** `go get golang.org/x/crypto` (bcrypt), `go get github.com/golang-jwt/jwt/v5`
 
-**Зависимости:** `golang.org/x/crypto` (bcrypt), `github.com/golang-jwt/jwt/v5`
+#### Шаг 1: Миграция — таблица users (15 мин)
 
-**Проверка:** регистрация → логин → получение cookie → CRUD расходов только своих
+Создай `migrations/000002_create_users.up.sql`:
+```sql
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+Создай `migrations/000002_create_users.down.sql`:
+```sql
+DROP TABLE IF EXISTS users;
+```
+
+#### Шаг 2: Миграция — user_id в expenses (15 мин)
+
+Создай `migrations/000003_add_user_id_to_expenses.up.sql`:
+```sql
+ALTER TABLE expenses ADD COLUMN user_id INTEGER REFERENCES users(id);
+CREATE INDEX idx_expenses_user_id ON expenses(user_id);
+```
+Создай `migrations/000003_add_user_id_to_expenses.down.sql`:
+```sql
+ALTER TABLE expenses DROP COLUMN IF EXISTS user_id;
+```
+
+**Важно:** `user_id` пока NULLABLE — старые записи без пользователя не сломаются. На День 7 можно сделать NOT NULL после миграции данных.
+
+Обнови `RunMigrations()` в `internal/repository/postgres/expense_repo.go` чтобы выполнял все .up.sql файлы по порядку (или создай отдельный `migrations.go`).
+
+#### Шаг 3: User entity (10 мин)
+
+Создай `internal/domain/user.go`:
+```go
+package domain
+
+import "time"
+
+type User struct {
+    ID           int       `json:"id"`
+    Email        string    `json:"email"`
+    PasswordHash string    `json:"-"`          // "-" = не попадёт в JSON ответ (как @JsonIgnore в Java)
+    Name         string    `json:"name"`
+    CreatedAt    time.Time `json:"created_at"`
+}
+```
+
+Добавь ошибки в `internal/domain/expense.go` (или отдельный errors.go):
+```go
+var (
+    ErrEmailExists   = errors.New("email already exists")
+    ErrUnauthorized  = errors.New("unauthorized")
+    ErrInvalidCreds  = errors.New("invalid email or password")
+)
+```
+
+#### Шаг 4: UserRepository (20 мин)
+
+Создай `internal/repository/user_repository.go`:
+```go
+type UserRepository interface {
+    Create(ctx context.Context, user *domain.User) error
+    GetByEmail(ctx context.Context, email string) (*domain.User, error)
+    GetByID(ctx context.Context, id int) (*domain.User, error)
+}
+```
+
+Создай `internal/repository/postgres/user_repo.go`:
+- `Create` — INSERT с RETURNING id. Обрабатывай UNIQUE violation → `domain.ErrEmailExists`
+- `GetByEmail` — SELECT WHERE email = $1. `sql.ErrNoRows` → `domain.ErrNotFound`
+- `GetByID` — SELECT WHERE id = $1
+
+**Аналогия C:** `UserRepository` интерфейс — это struct с function pointers. `user_repo.go` — конкретная реализация этих function pointers для PostgreSQL.
+
+#### Шаг 5: AuthService (45 мин)
+
+Создай `internal/service/auth_service.go`:
+```go
+type AuthService struct {
+    userRepo  repository.UserRepository
+    jwtSecret []byte
+}
+
+func NewAuthService(userRepo repository.UserRepository, jwtSecret string) *AuthService
+```
+
+Методы:
+- `Register(ctx, email, password, name) (*domain.User, error)`:
+  1. Валидация: email не пуст, password >= 6 символов
+  2. `bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)` — хеширование
+  3. `userRepo.Create(ctx, &user)` — сохранение
+  4. Аналогия: bcrypt = `crypt()` из POSIX, но с автоматическим salt
+
+- `Login(ctx, email, password) (string, error)`:
+  1. `userRepo.GetByEmail(ctx, email)` — найти пользователя
+  2. `bcrypt.CompareHashAndPassword(user.PasswordHash, password)` — сравнение
+  3. Если ок — генерируем JWT token:
+     ```go
+     claims := jwt.MapClaims{
+         "sub": user.ID,
+         "exp": time.Now().Add(24 * time.Hour).Unix(),
+         "iat": time.Now().Unix(),
+     }
+     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+     return token.SignedString(s.jwtSecret)
+     ```
+  4. Аналогия: JWT = подписанный JSON. Как HMAC в C: `HMAC_SHA256(secret, header+payload)`. Сервер может проверить подпись без базы данных.
+
+- `VerifyToken(tokenString) (int, error)`:
+  1. `jwt.Parse(tokenString, keyFunc)` — парсит и проверяет подпись
+  2. Извлекает `sub` claim → возвращает userID
+  3. Если токен expired или подпись невалидна → `domain.ErrUnauthorized`
+
+#### Шаг 6: Auth middleware (30 мин)
+
+Создай `internal/middleware/auth.go`:
+```go
+type contextKey string
+const UserIDKey contextKey = "userID"
+
+func RequireAuth(authService *service.AuthService) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            cookie, err := r.Cookie("token")
+            if err != nil {
+                http.Error(w, "unauthorized", http.StatusUnauthorized)
+                return
+            }
+            userID, err := authService.VerifyToken(cookie.Value)
+            if err != nil {
+                http.Error(w, "unauthorized", http.StatusUnauthorized)
+                return
+            }
+            ctx := context.WithValue(r.Context(), UserIDKey, userID)
+            next.ServeHTTP(w, r.WithContext(ctx))
+        })
+    }
+}
+
+func GetUserID(ctx context.Context) int {
+    return ctx.Value(UserIDKey).(int)
+}
+```
+
+#### Шаг 7: Auth handler (30 мин)
+
+Создай `internal/handler/api_auth.go`:
+- `HandleRegister` — POST /api/v1/auth/register: парсит JSON, вызывает Register, возвращает 201
+- `HandleLogin` — POST /api/v1/auth/login: парсит JSON, получает JWT, ставит HttpOnly cookie
+- `HandleLogout` — POST /api/v1/auth/logout: удаляет cookie (MaxAge: -1)
+
+#### Шаг 8: Обнови expense CRUD — привязка к user_id (30 мин)
+
+1. Добавь `UserID int` в `domain.Expense`
+2. Обнови SQL: WHERE user_id = $X во всех запросах
+3. Обнови интерфейс `ExpenseRepository` — добавь `userID int`
+4. Обнови `ExpenseService` — прокидывай userID из ctx
+5. Обнови хендлеры — `middleware.GetUserID(r.Context())`
+
+#### Шаг 9: Wiring в main.go (20 мин)
+
+1. Добавь `JWT_SECRET` в config.go
+2. Создай `userRepo` и `authService`
+3. Auth роуты БЕЗ middleware
+4. Expense роуты ЧЕРЕЗ middleware
+
+#### Шаг 10: Обнови CLI (30 мин)
+
+1. Добавь пункты "Регистрация", "Войти"
+2. Используй `http.Client` с `http.CookieJar`:
+```go
+jar, _ := cookiejar.New(nil)
+client := &http.Client{Jar: jar}
+```
+
+#### Проверка:
+```bash
+curl -v -X POST localhost:8080/api/v1/auth/register -d '{"email":"test@test.com","password":"123456","name":"Test"}'
+curl -v -c cookies.txt -X POST localhost:8080/api/v1/auth/login -d '{"email":"test@test.com","password":"123456"}'
+curl -b cookies.txt -X POST localhost:8080/api/v1/expenses -d '{"category":"Coffee","amount":500,"comment":"latte"}'
+curl -b cookies.txt localhost:8080/api/v1/expenses
+curl localhost:8080/api/v1/expenses  # → 401
+```
 
 ---
 
-### День 4: OAuth2 (Google + GitHub) (4-5 ч)
+### День 4: OAuth2 — Google + GitHub (4-5 ч)
 
-**Цель:** Вход через Google и GitHub. Привязка по email.
+**Цель:** Вход через Google и GitHub. Привязка по email — если пользователь зарегистрирован через email+password, а потом логинится через Google с тем же email, он попадает в тот же аккаунт.
 
-**Файлы:**
-- `internal/service/oauth_service.go` — конфиг провайдеров, GetAuthURL, HandleCallback
-- `internal/handler/oauth_handler.go` — GET /auth/google, /auth/google/callback, аналогично для GitHub
-- `migrations/000004_add_oauth_fields.up.sql` — oauth_provider, oauth_id, password_hash NULLABLE
+**Что изучить:** OAuth2 Authorization Code Flow (redirect → consent → callback с code → обмен code на access_token → запрос userinfo).
 
-**Зависимость:** `golang.org/x/oauth2`
+**Зависимость:** `go get golang.org/x/oauth2`
 
-**Проверка:** OAuth flow работает с localhost (или ngrok для callback)
+#### Шаг 1: Миграция — OAuth поля (10 мин)
+
+Создай `migrations/000004_add_oauth_fields.up.sql`:
+```sql
+ALTER TABLE users
+    ADD COLUMN oauth_provider VARCHAR(20) DEFAULT '',
+    ADD COLUMN oauth_id VARCHAR(255) DEFAULT '',
+    ALTER COLUMN password_hash DROP NOT NULL;
+CREATE UNIQUE INDEX idx_users_oauth ON users(oauth_provider, oauth_id) WHERE oauth_provider != '';
+```
+
+#### Шаг 2: Config — OAuth credentials (15 мин)
+
+Добавь `GoogleClientID`, `GoogleClientSecret`, `GoogleRedirectURL`, аналогично для GitHub в `config.go`.
+
+#### Шаг 3: Обнови UserRepository (15 мин)
+
+Добавь: `GetByOAuth`, `CreateOAuth`, `LinkOAuth`
+
+#### Шаг 4: OAuthService (45 мин)
+
+Создай `internal/service/oauth_service.go`:
+- `GetGoogleAuthURL(state)`, `GetGitHubAuthURL(state)`
+- `HandleGoogleCallback(ctx, code)` — обмен code → token → userinfo → find/create user → JWT
+- `HandleGitHubCallback(ctx, code)` — аналогично
+
+#### Шаг 5: OAuth handler (30 мин)
+
+Создай `internal/handler/oauth_handler.go`:
+- GET /auth/google → redirect на Google consent
+- GET /auth/google/callback → обмен code, ставит cookie, redirect на /dashboard
+- Аналогично для GitHub
+
+#### Шаг 6: Wiring + тест (30 мин)
+
+**Проверка:** браузер → `http://localhost:8080/auth/google` → Google consent → callback → cookie → redirect
 
 ---
 
 ### День 5: Frontend — html/template + HTMX + TailwindCSS (5-6 ч)
 
-**Цель:** Полноценный UI. HTMX для динамики, минимум JS.
+**Цель:** Полноценный UI в браузере. Login/register, список расходов с добавлением/удалением без перезагрузки.
 
-**Файлы:**
-- `templates/layouts/base.html` — скелет с Tailwind CDN + HTMX script
-- `templates/pages/login.html` — форма + кнопки Google/GitHub
-- `templates/pages/register.html`
-- `templates/pages/expenses.html` — таблица расходов + форма добавления
-- `templates/partials/expense_row.html` — `<tr>` для HTMX swap
-- `internal/handler/web_page.go` — рендеринг страниц (/, /login, /register, /dashboard)
-- `internal/handler/web_expense.go` — HTMX-хендлеры (POST/PUT/DELETE /expenses → возвращают HTML partials)
-- Обновить `cmd/server/main.go` — `http.FileServer` для static/, регистрация web-роутов
+**Что изучить:** `html/template` (как Jinja2 — `{{.FieldName}}`, `{{range}}`), HTMX (`hx-get`, `hx-post`, `hx-swap` заменяют AJAX), TailwindCSS (utility CSS через CDN).
 
-**Web-роуты** отдают HTML (для браузера). **API-роуты** (`/api/v1/*`) остаются строго JSON (для CLI).
+#### Шаг 1: Структура templates (10 мин)
 
-**HTMX-атрибуты** вместо JS: `hx-delete="/expenses/5" hx-target="closest tr" hx-swap="outerHTML"`
+```
+templates/
+├── layouts/base.html
+├── pages/{login,register,expenses}.html
+└── partials/{expense_row,expense_list,expense_form}.html
+```
 
-**Проверка:** браузер → логин → список расходов → добавить/удалить без перезагрузки страницы
+#### Шаг 2: Base layout (20 мин)
+
+`templates/layouts/base.html` — `<html>`, Tailwind CDN, HTMX script, navbar, `{{template "content" .}}`
+
+#### Шаг 3: Login + Register (30 мин)
+
+`hx-post="/auth/login"` — HTMX делает POST, ответ вставляется в DOM. При успехе — `HX-Redirect: /expenses`.
+
+#### Шаг 4: Expenses страница (45 мин)
+
+Форма добавления (`hx-post="/expenses" hx-target="#expense-list" hx-swap="afterbegin"`) + таблица с `expense_row.html` partial. Удаление: `hx-delete="/expenses/{{.ID}}" hx-target="#expense-{{.ID}}" hx-swap="outerHTML"`.
+
+#### Шаг 5: WebPageHandler (30 мин)
+
+`internal/handler/web_page.go` — HandleIndex, HandleLogin, HandleRegister, HandleExpenses. Загрузка шаблонов через `template.ParseGlob`.
+
+#### Шаг 6: WebExpenseHandler (30 мин)
+
+`internal/handler/web_expense.go` — HandleCreate (form data → partial HTML), HandleDelete (пустой ответ), HandleWebLogin/Logout.
+
+**API vs Web:** API = JSON (CLI, bot). Web = form data → HTML (браузер + HTMX). Оба вызывают одни сервисы.
+
+#### Шаг 7: Wiring + static files (20 мин)
+
+`http.FileServer` для static/, регистрация web-роутов в main.go.
+
+**Проверка:** браузер → login → добавить/удалить расход без перезагрузки
 
 ---
 
 ### День 6: Dashboard + Графики + Seed Script (4-5 ч)
 
-**Цель:** Красивый дашборд с Chart.js. Демо-данные для работодателя.
+**Цель:** Дашборд с Chart.js (расходы по месяцам, по категориям). Seed-скрипт с 1200 демо-транзакциями.
 
-**Файлы:**
-- `scripts/seed.go` — создаёт пользователя test@demo.com / 123456, генерирует 1000+ транзакций за 12 месяцев с категориями: Такси, Кофе, Продукты, Подписки, Транспорт, Одежда, Развлечения, Образование
-- `templates/pages/dashboard.html` — карточки (итого за месяц, среднее в день, топ категория) + `<canvas>` для Chart.js
-- `internal/handler/api_expense.go` — добавить `GET /api/v1/stats/monthly`, `GET /api/v1/stats/by-category`
-- SQL: `SELECT date_trunc('month', date), SUM(amount) FROM expenses WHERE user_id = $1 GROUP BY 1`
+#### Шаг 1: Stats в repository и service (45 мин)
 
-**Проверка:** `go run scripts/seed.go` → логин test@demo.com → дашборд с графиками
+`GetMonthlyStats(ctx, userID)`, `GetCategoryStats(ctx, userID)` — SQL с GROUP BY.
+
+#### Шаг 2: Stats API endpoints (20 мин)
+
+GET /api/v1/stats/monthly, GET /api/v1/stats/by-category → JSON.
+
+#### Шаг 3: Dashboard страница (45 мин)
+
+`templates/pages/dashboard.html` — карточки (итого за месяц, среднее в день, топ категория) + `<canvas>` для Chart.js. Графики через `fetch('/api/v1/stats/...')` → Chart.js (единственное место с JS).
+
+#### Шаг 4: Seed script (45 мин)
+
+`scripts/seed.go` — создаёт test@demo.com / 123456, генерирует 1200 расходов за 12 месяцев по 8 категориям.
+
+#### Шаг 5: Wiring (15 мин)
+
+GET /dashboard + API stats роуты (с auth middleware).
+
+**Проверка:** `go run scripts/seed.go` → login → dashboard с графиками
 
 ---
 
-### День 7: Тесты, Graceful Shutdown, Rate Limiting, Deploy (5-6 ч)
+### День 7: Тесты, Graceful Shutdown, Rate Limiting, Polish (5-6 ч)
 
-**Цель:** Production-ready. Тесты. Один `docker-compose up` запускает всё.
+**Цель:** Production-ready. Тесты. Graceful shutdown. Логирование. Rate limiting.
 
-**Тесты:**
-- `internal/service/expense_service_test.go` — unit-тесты с мок-репозиторием:
-  - Создать `mockExpenseRepo` struct, реализующий `ExpenseRepository` интерфейс
-  - Тестировать: Create валидация (amount ≤ 0, пустая категория), GetAll, GetByID с ErrNotFound, GetTotal
-  - Аналогия: в Java это Mockito mock для DAO, в Go — просто struct с нужными методами
-- `internal/handler/api_expense_test.go` — integration-тесты:
-  - `httptest.NewServer` + реальный сервис с мок-репозиторием
-  - Тестировать: POST 201, GET 200, GET 404, DELETE 204, невалидный JSON → 400
+**Зависимость:** `go get golang.org/x/time`
 
-**Инфраструктура:**
-- Обновить `cmd/server/main.go` — graceful shutdown через `signal.Notify` + `srv.Shutdown(ctx)`
-- `internal/middleware/logging.go` — `log/slog`, логирование method/path/status/duration
-- `internal/middleware/ratelimit.go` — `golang.org/x/time/rate`, token bucket per IP
-- Обновить `docker-compose.yml` — healthcheck для postgres, restart policy, `.env` файл
-- Обновить `Dockerfile` — COPY migrations, templates, static
+#### Шаг 1: Unit-тесты service (60 мин)
 
-**Зависимость:** `golang.org/x/time`
+`internal/service/expense_service_test.go` — mock repo + table-driven тесты: Create (валидация), GetAll, GetByID (found + not found), GetTotal, Delete.
 
-**Финальная проверка:**
-1. `go test ./...` — все тесты зелёные
-2. `docker-compose up --build` стартует чисто
-3. `go run scripts/seed.go` заполняет данные
-4. Логин test@demo.com / 123456 → дашборд с графиками
-5. CLI подключается к API, все команды работают
-6. OAuth Google/GitHub работает
-7. Rate limiting срабатывает при спаме запросов
-8. `Ctrl+C` → graceful shutdown в логах
-9. Рестарт → данные на месте (PostgreSQL volume)
+#### Шаг 2: Integration-тесты handler (45 мин)
+
+`internal/handler/api_expense_test.go` — `httptest.NewServer` + mock repo. POST 201, GET 200/404, POST 400, DELETE 200/404.
+
+#### Шаг 3: Graceful shutdown (30 мин)
+
+`signal.Notify(quit, SIGINT, SIGTERM)` → `srv.Shutdown(ctx)` с 5 сек таймаутом.
+
+#### Шаг 4: Logging middleware (30 мин)
+
+`internal/middleware/logging.go` — `log/slog`, method/path/status/duration.
+
+#### Шаг 5: Rate limiting (30 мин)
+
+`internal/middleware/ratelimit.go` — `golang.org/x/time/rate`, token bucket per IP. 10 req/sec, burst 20.
+
+#### Шаг 6: Docker финализация (30 мин)
+
+Обнови Dockerfile (COPY templates, static), docker-compose (healthcheck, restart, env_file), `.env.example`.
+
+**Проверка:** `go test ./...` + `docker-compose up --build` + graceful shutdown + rate limiting
+
+---
+
+### День 8: Telegram Bot — `gopkg.in/telebot.v3` (5-6 ч)
+
+**Цель:** Telegram бот с теми же функциями что на сайте (кроме аналитических графиков). Привязка аккаунта через короткий код (безопасно — пароль не вводится в Telegram).
+
+**Что изучить:** Telegram Bot API (long polling), state machine для step-by-step input, `gopkg.in/telebot.v3`.
+
+**Зависимость:** `go get gopkg.in/telebot.v3`
+
+**Где взять токен:** @BotFather → /newbot
+
+#### Шаг 1: Миграция — telegram_chat_id (15 мин)
+
+`migrations/000005_add_telegram_chat_id.up.sql`:
+```sql
+ALTER TABLE users ADD COLUMN telegram_chat_id BIGINT UNIQUE;
+```
+Обнови `domain.User`: `TelegramChatID *int64`
+
+#### Шаг 2: Config (10 мин)
+
+`TelegramBotToken` в `config.go` из env `TELEGRAM_BOT_TOKEN`.
+
+#### Шаг 3: Механизм привязки — Link Code (30 мин)
+
+**Flow:** /start → бот генерирует 6-значный код → пользователь вводит код на Dashboard → аккаунты связаны.
+
+`internal/service/link_service.go`:
+- `GenerateCode(chatID int64) string` — 6-значный код, хранится in-memory, TTL 10 мин
+- `ConfirmLink(ctx, userID, code) error` — находит pending code, привязывает telegram_chat_id к user
+
+Добавь в `UserRepository`: `GetByTelegramChatID(ctx, chatID)`, `LinkTelegram(ctx, userID, chatID)`.
+
+#### Шаг 4: Web endpoint для привязки (20 мин)
+
+POST /telegram/link (с auth middleware) — форма на Dashboard, парсит code, вызывает `linkService.ConfirmLink`.
+
+#### Шаг 5: Bot handler — Clean Architecture (45 мин)
+
+Создай `internal/handler/telegram/bot.go`:
+```go
+type BotHandler struct {
+    bot            *tele.Bot
+    expenseService *service.ExpenseService
+    userService    *service.UserService
+    linkService    *service.LinkService
+    sessions       map[int64]*UserSession
+    mu             sync.RWMutex
+}
+```
+
+Бот — это handler-слой (как HTTP handlers). Принимает сервисы через DI. **Не лезет в БД напрямую.**
+
+Команды через `b.Handle("/command", handler)` — telebot.v3 API.
+
+#### Шаг 6: Команды и auth check (45 мин)
+
+`internal/handler/telegram/handlers.go`:
+- `/start` → проверяет привязку. Если нет — генерирует код. Если да — "Аккаунт привязан!"
+- `/help` → список команд
+- `/add` → запускает state machine (категория → сумма → комментарий)
+- `/list` → показывает последние 20 расходов
+- `/total` → сумма
+- `/delete` → запрашивает ID
+
+Auth: `userService.GetByTelegramChatID(chatID)` → если nil, "Привяжите аккаунт через /start".
+
+#### Шаг 7: State machine (30 мин)
+
+`handleText` — fallback для всех текстовых сообщений. Если session.State != "" — обрабатывает как часть flow (awaiting_category → awaiting_amount → awaiting_comment). `sync.RWMutex` для thread safety.
+
+#### Шаг 8: UserService (10 мин)
+
+`internal/service/user_service.go`: `GetByTelegramChatID(ctx, chatID)` — прокидка в repo.
+
+#### Шаг 9: Wiring в main.go (20 мин)
+
+```go
+if cfg.TelegramBotToken != "" {
+    botHandler, _ := telegram.NewBotHandler(token, expenseService, userService, linkService)
+    go botHandler.Start()
+    defer botHandler.Stop()
+}
+```
+
+**Архитектура:**
+```
+cmd/server/main.go
+├── HTTP handlers (goroutine 1) → services → postgres
+└── Telegram handler (goroutine 2) → services → postgres
+```
+
+#### Шаг 10: Тест (15 мин)
+
+/start → код → вводим на сайте → /add → /list → /total → /delete
+
+**Проверка:** расходы из бота видны на сайте и наоборот (общая БД!)
 
 ---
 
@@ -291,85 +633,25 @@ DELETE /expenses/{id}             → удалить (HTMX partial response)
 
 | Пакет | Зачем | День |
 |-------|-------|------|
-| `github.com/jackc/pgx/v5` | PostgreSQL драйвер | 2 |
-| `github.com/golang-migrate/migrate/v4` | Миграции БД | 2 |
+| `github.com/lib/pq` | PostgreSQL драйвер | 2 |
 | `golang.org/x/crypto` | bcrypt хеширование | 3 |
 | `github.com/golang-jwt/jwt/v5` | JWT токены | 3 |
 | `golang.org/x/oauth2` | OAuth2 клиент | 4 |
 | `golang.org/x/time` | Rate limiter | 7 |
+| `gopkg.in/telebot.v3` | Telegram Bot API | 8 |
 
 ---
 
-## День 1: Пошаговые инструкции
+## Финальная проверка (после Дня 8)
 
-### Шаг 1: Создай domain layer (30 мин)
-
-Создай `internal/domain/expense.go`:
-- Перенеси `Expense` struct из `internal/model/expense.go`, пакет `domain`
-- Оставь только struct + конструктор `NewExpense(category, amount, comment) Expense`
-- **НЕ** переноси `CalculateTotal`, `NextID`, `FindExpenseByID`, `DeleteExpenseFromSlice` — они уйдут в service/repository
-
-Создай `internal/domain/errors.go`:
-```go
-var (
-    ErrNotFound   = errors.New("not found")
-    ErrValidation = errors.New("validation error")
-)
-```
-
-### Шаг 2: Определи интерфейс репозитория (20 мин)
-
-Создай `internal/repository/expense_repository.go` с интерфейсом `ExpenseRepository` (5 методов, все с `context.Context`).
-
-**Зачем ctx:** PostgreSQL на День 2 потребует ctx для таймаутов запросов. Добавив сейчас, не придётся менять сигнатуры потом.
-
-### Шаг 3: Реализуй JSON-репозиторий (45 мин)
-
-Создай `internal/repository/json/expense_repo.go`:
-- Struct: `filePath string` + `sync.Mutex` + `expenses []domain.Expense`
-- Конструктор: загружает файл при старте (как текущий `LoadExpenses`)
-- Все методы: lock → операция → save to file → unlock
-- Mutex критичен: это `pthread_mutex_t` из C, без него — data race
-
-### Шаг 4: Создай сервисный слой (45 мин)
-
-`internal/service/expense_service.go`:
-- Struct принимает `repository.ExpenseRepository` через конструктор (DI как передача vtable в C)
-- Валидация: amount > 0, category не пуст
-- `GetTotal(ctx)` — сюда переезжает логика `CalculateTotal`
-
-### Шаг 5: HTTP хендлеры (60 мин)
-
-`internal/handler/response.go` — writeJSON, writeError
-`internal/handler/api_expense.go`:
-- Struct с зависимостью на service
-- HandleCreate, HandleGetAll, HandleGetByID, HandleUpdate, HandleDelete
-- Маппинг ошибок: `errors.Is(err, domain.ErrNotFound)` → 404, ErrValidation → 400, else → 500
-- `RegisterRoutes(mux)` — регистрирует роуты на `/api/v1/expenses*`
-
-### Шаг 6: Перепиши cmd/server/main.go (30 мин)
-
-Чистый wiring:
-```go
-repo → service → handler → mux → ListenAndServe
-```
-Это DI без фреймворка. В Spring это @Autowired, в C — передача struct с function pointers в init().
-
-### Шаг 7: Обнови CLI (20 мин)
-
-Обнови импорты в `cmd/cli/main.go` и `menu.go` на `domain` и `repository/json`. (HTTP-клиент — на День 2)
-
-### Шаг 8: Удали старое (5 мин)
-
-Удали `internal/model/`, `internal/storage/`. Запусти `go build ./...`.
-
-### Шаг 9: Тестируй (15 мин)
-
-```bash
-go run cmd/server/main.go
-curl localhost:8080/api/v1/expenses
-curl -X POST localhost:8080/api/v1/expenses -d '{"category":"Test","amount":500,"comment":"test"}'
-curl localhost:8080/api/v1/expenses/1
-curl -X PUT localhost:8080/api/v1/expenses/1 -d '{"category":"Updated","amount":999,"comment":"changed"}'
-curl -X DELETE localhost:8080/api/v1/expenses/1
-```
+1. `go test ./...` — все тесты зелёные
+2. `docker-compose up --build` стартует чисто
+3. `go run scripts/seed.go` — 1200 расходов для demo
+4. Браузер: login test@demo.com / 123456 → expenses list → dashboard с графиками
+5. CLI: login → add/list/total/update/delete → всё работает
+6. Telegram: /start → код → привязка на сайте → /add → /list → /total → /delete
+7. OAuth Google/GitHub → вход через браузер
+8. Rate limiting: спам curl → 429
+9. `Ctrl+C` → "Server stopped gracefully" + бот остановлен
+10. `docker-compose up` → данные на месте (PostgreSQL volume)
+11. Все три клиента (браузер, CLI, Telegram) видят одни и те же данные

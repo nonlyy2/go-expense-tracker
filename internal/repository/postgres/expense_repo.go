@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"os"
 
 	_ "github.com/lib/pq"
 
@@ -28,22 +29,22 @@ func NewExpenseRepo(dsn string) (*expenseRepo, error) {
 		return nil, err
 	}
 
-	// create expense table
-	query := `
-	CREATE TABLE IF NOT EXISTS expenses (
-		id SERIAL PRIMARY KEY,
-		date TIMESTAMP NOT NULL,
-		amount NUMERIC(10, 2) NOT NULL,
-		category VARCHAR(255) NOT NULL,
-		comment TEXT
-	);`
-
-	_, err = db.Exec(query)
-	if err != nil {
-		return nil, err
-	}
-
 	return &expenseRepo{db: db}, nil
+}
+
+// DB returns raw db connection (for migrations etc)
+func (r *expenseRepo) DB() *sql.DB {
+	return r.db
+}
+
+// RunMigrations reads and executes .up.sql files from migrationsDir
+func RunMigrations(db *sql.DB, migrationsDir string) error {
+	data, err := os.ReadFile(migrationsDir + "/000001_create_expenses.up.sql")
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(string(data))
+	return err
 }
 
 func (r *expenseRepo) Create(ctx context.Context, expense *domain.Expense) error {

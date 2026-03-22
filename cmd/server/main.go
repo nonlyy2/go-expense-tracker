@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"go-expense-tracker/internal/config"
 	"go-expense-tracker/internal/handler"
 	postgresrepo "go-expense-tracker/internal/repository/postgres"
 	"go-expense-tracker/internal/service"
@@ -13,22 +14,24 @@ import (
 func main() {
 	fmt.Println("Starting Expense Tracker API with PostgreSQL...")
 
-	// format: postgres://login:pass@host:port/db_name?sslmode=disable
-	dsn := "postgres://postgres:qwerty@localhost:5433/expense_tracker?sslmode=disable"
+	// load config from env (or defaults)
+	cfg := config.Load()
 
-	// create repo to work with PostreSQL
-	repo, err := postgresrepo.NewExpenseRepo(dsn)
+	// connect to db
+	repo, err := postgresrepo.NewExpenseRepo(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// create service
-	svc := service.NewExpenseService(repo)
+	// run migrations
+	if err := postgresrepo.RunMigrations(repo.DB(), "migrations"); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
 
-	// create handler
+	// wire up: service -> handler -> router
+	svc := service.NewExpenseService(repo)
 	apiHandler := handler.NewExpenseHandler(svc)
 
-	// create router
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 
@@ -37,10 +40,8 @@ func main() {
 	})
 
 	// launch server
-	port := ":8080"
-	fmt.Printf("Server is running on http://localhost%s ...\n", port)
-
-	if err := http.ListenAndServe(port, mux); err != nil {
+	fmt.Printf("Server is running on http://localhost%s ...\n", cfg.ServerPort)
+	if err := http.ListenAndServe(cfg.ServerPort, mux); err != nil {
 		log.Fatalf("Server crashed: %v", err)
 	}
 }
