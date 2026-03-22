@@ -19,7 +19,7 @@ func NewExpenseService(repo repository.ExpenseRepository) *ExpenseService {
 }
 
 // CreateExpense checks data and creates new expense
-func (s *ExpenseService) CreateExpense(ctx context.Context, category string, amount float64, comment string) (*domain.Expense, error) {
+func (s *ExpenseService) CreateExpense(ctx context.Context, category string, amount float64, comment string, userID int) (*domain.Expense, error) {
 	// validation
 	if amount <= 0 {
 		return nil, domain.ErrInvalidAmount
@@ -34,7 +34,7 @@ func (s *ExpenseService) CreateExpense(ctx context.Context, category string, amo
 		Amount:   amount,
 		Category: category,
 		Comment:  comment,
-		// id'll be gen-ed by repo then
+		UserID:   userID,
 	}
 
 	// save to repo
@@ -46,15 +46,15 @@ func (s *ExpenseService) CreateExpense(ctx context.Context, category string, amo
 }
 
 // GetAllExpenses requests data from repo
-func (s *ExpenseService) GetAllExpenses(ctx context.Context) ([]domain.Expense, error) {
-	return s.repo.GetAll(ctx)
+func (s *ExpenseService) GetAllExpenses(ctx context.Context, userID int) ([]domain.Expense, error) {
+	return s.repo.GetAll(ctx, userID)
 }
 
-func (s *ExpenseService) GetExpenseByID(ctx context.Context, id int) (*domain.Expense, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *ExpenseService) GetExpenseByID(ctx context.Context, id int, userID int) (*domain.Expense, error) {
+	return s.repo.GetByID(ctx, id, userID)
 }
 
-func (s *ExpenseService) UpdateExpense(ctx context.Context, id int, category string, amount float64, comment string) (*domain.Expense, error) {
+func (s *ExpenseService) UpdateExpense(ctx context.Context, id int, category string, amount float64, comment string, userID int) (*domain.Expense, error) {
 	// validation
 	if amount <= 0 {
 		return nil, domain.ErrInvalidAmount
@@ -64,7 +64,7 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id int, category str
 	}
 
 	// expense exists?
-	existingExp, err := s.repo.GetByID(ctx, id)
+	existingExp, err := s.repo.GetByID(ctx, id, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,6 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id int, category str
 	existingExp.Category = category
 	existingExp.Amount = amount
 	existingExp.Comment = comment
-	// date won't be changed
 
 	// save to repo
 	if err := s.repo.Update(ctx, existingExp); err != nil {
@@ -82,13 +81,13 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id int, category str
 	return existingExp, nil
 }
 
-func (s *ExpenseService) DeleteExpense(ctx context.Context, id int) error {
-	return s.repo.Delete(ctx, id)
+func (s *ExpenseService) DeleteExpense(ctx context.Context, id int, userID int) error {
+	return s.repo.Delete(ctx, id, userID)
 }
 
 // calc total amount of expenses
-func (s *ExpenseService) GetTotal(ctx context.Context) (float64, error) {
-	expenses, err := s.repo.GetAll(ctx)
+func (s *ExpenseService) GetTotal(ctx context.Context, userID int) (float64, error) {
+	expenses, err := s.repo.GetAll(ctx, userID)
 	if err != nil {
 		return 0, err
 	}
