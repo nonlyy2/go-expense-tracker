@@ -5,8 +5,8 @@ import (
 	"log"
 	"net/http"
 
-	"go-expense-tracker/internal/config"
 	"go-expense-tracker/internal/handler"
+	"go-expense-tracker/internal/middleware"
 	postgresrepo "go-expense-tracker/internal/repository/postgres"
 	"go-expense-tracker/internal/service"
 )
@@ -14,34 +14,55 @@ import (
 func main() {
 	fmt.Println("Starting Expense Tracker API with PostgreSQL...")
 
-	// load config from env (or defaults)
-	cfg := config.Load()
+	// format: postgres://login:pass@host:port/db_name?sslmode=disable
+	dsn := "postgres://postgres:qwerty@localhost:5433/expense_tracker?sslmode=disable"
 
-	// connect to db
-	repo, err := postgresrepo.NewExpenseRepo(cfg.DatabaseURL)
+	// create repo to work with PostreSQL
+	repo, err := postgresrepo.NewExpenseRepo(dsn)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// run migrations
 	if err := postgresrepo.RunMigrations(repo.DB(), "migrations"); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
-	// wire up: service -> handler -> router
+	// create service
 	svc := service.NewExpenseService(repo)
+
+	// create handler
 	apiHandler := handler.NewExpenseHandler(svc)
 
+	// create router
 	mux := http.NewServeMux()
-	apiHandler.RegisterRoutes(mux)
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Welcome to Expense Tracker API with PostgreSQL!\n")
 	})
 
+	// secret JWT key
+	jwtSecret := "super-secret-jwt-key-for-my-app"
+
+	db := repo.DB()
+
+	userRepo := postgresrepo.NewUserRepo(db)
+	authSvc := service.NewAuthService(userRepo, jwtSecret)
+	authHandler := handler.NewAuthHandler(authSvc)
+
+	authHandler.RegisterRoutes(mux)
+
+	authMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return middleware.RequireAuth(authSvc, next)
+	}
+
+	// transmit middleware to expense handler
+	apiHandler.RegisterRoutes(mux, authMiddleware)
+
 	// launch server
-	fmt.Printf("Server is running on http://localhost%s ...\n", cfg.ServerPort)
-	if err := http.ListenAndServe(cfg.ServerPort, mux); err != nil {
+	port := ":8080"
+	fmt.Printf("Server is running on http://localhost%s ...\n", port)
+
+	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatalf("Server crashed: %v", err)
 	}
 }
