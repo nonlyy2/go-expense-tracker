@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"go-expense-tracker/internal/domain"
+	"go-expense-tracker/internal/middleware"
 	"go-expense-tracker/internal/service"
 )
 
@@ -47,6 +48,12 @@ func handleError(w http.ResponseWriter, err error) {
 
 // post request
 func (h *ExpenseHandler) CreateExpense(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		Category string  `json:"category"`
 		Amount   float64 `json:"amount"`
@@ -58,7 +65,7 @@ func (h *ExpenseHandler) CreateExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expense, err := h.service.CreateExpense(r.Context(), req.Category, req.Amount, req.Comment)
+	expense, err := h.service.CreateExpense(r.Context(), req.Category, req.Amount, req.Comment, userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -69,7 +76,13 @@ func (h *ExpenseHandler) CreateExpense(w http.ResponseWriter, r *http.Request) {
 
 // get all expenses
 func (h *ExpenseHandler) GetAllExpenses(w http.ResponseWriter, r *http.Request) {
-	expenses, err := h.service.GetAllExpenses(r.Context())
+	userID := middleware.GetUserID(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	expenses, err := h.service.GetAllExpenses(r.Context(), userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -86,7 +99,13 @@ func (h *ExpenseHandler) GetExpenseByID(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	expense, err := h.service.GetExpenseByID(r.Context(), id)
+	userID := middleware.GetUserID(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	expense, err := h.service.GetExpenseByID(r.Context(), id, userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -116,7 +135,13 @@ func (h *ExpenseHandler) UpdateExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expense, err := h.service.UpdateExpense(r.Context(), id, req.Category, req.Amount, req.Comment)
+	userID := middleware.GetUserID(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	expense, err := h.service.UpdateExpense(r.Context(), id, req.Category, req.Amount, req.Comment, userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -134,7 +159,13 @@ func (h *ExpenseHandler) DeleteExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.DeleteExpense(r.Context(), id); err != nil {
+	userID := middleware.GetUserID(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.service.DeleteExpense(r.Context(), id, userID); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -147,10 +178,10 @@ func (h *ExpenseHandler) DeleteExpense(w http.ResponseWriter, r *http.Request) {
 // ==============
 
 // RegisterRoutes binds handler to concrete url-s
-func (h *ExpenseHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/expenses", h.CreateExpense)
-	mux.HandleFunc("GET /api/v1/expenses", h.GetAllExpenses)
-	mux.HandleFunc("GET /api/v1/expenses/{id}", h.GetExpenseByID)
-	mux.HandleFunc("PUT /api/v1/expenses/{id}", h.UpdateExpense)
-	mux.HandleFunc("DELETE /api/v1/expenses/{id}", h.DeleteExpense)
+func (h *ExpenseHandler) RegisterRoutes(mux *http.ServeMux, requireAuth func(http.HandlerFunc) http.HandlerFunc) {
+	mux.HandleFunc("GET /api/v1/expenses", requireAuth(h.GetAllExpenses))
+	mux.HandleFunc("POST /api/v1/expenses", requireAuth(h.CreateExpense))
+	mux.HandleFunc("GET /api/v1/expenses/{id}", requireAuth(h.GetExpenseByID))
+	mux.HandleFunc("PUT /api/v1/expenses/{id}", requireAuth(h.UpdateExpense))
+	mux.HandleFunc("DELETE /api/v1/expenses/{id}", requireAuth(h.DeleteExpense))
 }
