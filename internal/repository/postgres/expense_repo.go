@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 
 	_ "github.com/lib/pq"
@@ -37,29 +38,44 @@ func (r *expenseRepo) DB() *sql.DB {
 	return r.db
 }
 
-// RunMigrations reads and executes .up.sql files from migrationsDir
+// RunMigrations reads and executes all .up.sql files from migrationsDir in order
 func RunMigrations(db *sql.DB, migrationsDir string) error {
-	data, err := os.ReadFile(migrationsDir + "/000001_create_expenses.up.sql")
+	files, err := os.ReadDir(migrationsDir)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(string(data))
-	return err
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		name := f.Name()
+		if len(name) < 7 || name[len(name)-7:] != ".up.sql" {
+			continue
+		}
+		data, err := os.ReadFile(migrationsDir + "/" + name)
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func (r *expenseRepo) Create(ctx context.Context, expense *domain.Expense) error {
 	// sql query
-	query := `INSERT INTO expenses (date, amount, category, comment) VALUES ($1, $2, $3, $4) RETURNING id`
+	query := `INSERT INTO expenses (date, amount, category, comment, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`
 
 	// request query and write gen-ed ID
-	err := r.db.QueryRowContext(ctx, query, expense.Date, expense.Amount, expense.Category, expense.Comment).Scan(&expense.ID)
+	err := r.db.QueryRowContext(ctx, query, expense.Date, expense.Amount, expense.Category, expense.Comment, expense.UserID).Scan(&expense.ID)
 	return err
 }
 
-func (r *expenseRepo) GetAll(ctx context.Context) ([]domain.Expense, error) {
-	query := `SELECT id, date, amount, category, comment FROM expenses ORDER BY date DESC`
+func (r *expenseRepo) GetAll(ctx context.Context, userID int) ([]domain.Expense, error) {
+	query := `SELECT id, date, amount, category, comment, user_id FROM expenses WHERE user_id = $1 ORDER BY date DESC`
 
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +85,7 @@ func (r *expenseRepo) GetAll(ctx context.Context) ([]domain.Expense, error) {
 
 	for rows.Next() {
 		var e domain.Expense
-		if err := rows.Scan(&e.ID, &e.Date, &e.Amount, &e.Category, &e.Comment); err != nil {
+		if err := rows.Scan(&e.ID, &e.Date, &e.Amount, &e.Category, &e.Comment, &e.UserID); err != nil {
 			return nil, err
 		}
 		expenses = append(expenses, e)
@@ -78,11 +94,11 @@ func (r *expenseRepo) GetAll(ctx context.Context) ([]domain.Expense, error) {
 	return expenses, rows.Err()
 }
 
-func (r *expenseRepo) GetByID(ctx context.Context, id int) (*domain.Expense, error) {
-	query := `SELECT id, date, amount, category, comment FROM expenses WHERE id = $1`
+func (r *expenseRepo) GetByID(ctx context.Context, id int, userID int) (*domain.Expense, error) {
+	query := `SELECT id, date, amount, category, comment, user_id FROM expenses WHERE id = $1 AND user_id = $2`
 
 	var e domain.Expense
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&e.ID, &e.Date, &e.Amount, &e.Category, &e.Comment)
+	err := r.db.QueryRowContext(ctx, query, id, userID).Scan(&e.ID, &e.Date, &e.Amount, &e.Category, &e.Comment, &e.UserID)
 
 	if err == sql.ErrNoRows {
 		return nil, domain.ErrNotFound // map db error to our custom errors
@@ -95,9 +111,9 @@ func (r *expenseRepo) GetByID(ctx context.Context, id int) (*domain.Expense, err
 }
 
 func (r *expenseRepo) Update(ctx context.Context, expense *domain.Expense) error {
-	query := `UPDATE expenses SET amount = $1, category = $2, comment = $3 WHERE id = $4`
+	query := `UPDATE expenses SET amount = $1, category = $2, comment = $3 WHERE id = $4 AND user_id = $5`
 
-	res, err := r.db.ExecContext(ctx, query, expense.Amount, expense.Category, expense.Comment, expense.ID)
+	res, err := r.db.ExecContext(ctx, query, expense.Amount, expense.Category, expense.Comment, expense.ID, expense.UserID)
 	if err != nil {
 		return err
 	}
@@ -114,10 +130,10 @@ func (r *expenseRepo) Update(ctx context.Context, expense *domain.Expense) error
 	return nil
 }
 
-func (r *expenseRepo) Delete(ctx context.Context, id int) error {
-	query := `DELETE FROM expenses WHERE id = $1`
+func (r *expenseRepo) Delete(ctx context.Context, id int, userID int) error {
+	query := `DELETE FROM expenses WHERE id = $1 AND user_id = $2`
 
-	res, err := r.db.ExecContext(ctx, query, id)
+	res, err := r.db.ExecContext(ctx, query, id, userID)
 	if err != nil {
 		return err
 	}
