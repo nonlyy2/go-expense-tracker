@@ -53,7 +53,7 @@ func (r *expenseRepo) saveToFile() error {
 	return os.WriteFile(r.filePath, jsonData, 0644)
 }
 
-func (r *expenseRepo) GetAll(ctx context.Context) ([]domain.Expense, error) {
+func (r *expenseRepo) GetAll(ctx context.Context, userID int) ([]domain.Expense, error) {
 	r.mu.Lock()         // mutex
 	defer r.mu.Unlock() // guarantee that we unlock mutex after func
 
@@ -64,7 +64,7 @@ func (r *expenseRepo) GetAll(ctx context.Context) ([]domain.Expense, error) {
 	return result, nil
 }
 
-func (r *expenseRepo) GetByID(ctx context.Context, id int) (*domain.Expense, error) {
+func (r *expenseRepo) GetByID(ctx context.Context, id int, userID int) (*domain.Expense, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -114,7 +114,7 @@ func (r *expenseRepo) Update(ctx context.Context, expense *domain.Expense) error
 	return domain.ErrNotFound
 }
 
-func (r *expenseRepo) Delete(ctx context.Context, id int) error {
+func (r *expenseRepo) Delete(ctx context.Context, id int, userID int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

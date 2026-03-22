@@ -1,20 +1,13 @@
 package domain
 
 import (
-	"errors"
 	"time"
-)
-
-// custom errors
-var (
-	ErrNotFound      = errors.New("expense not found")
-	ErrInvalidAmount = errors.New("amount must be greater than zero")
-	ErrEmptyCategory = errors.New("category cannot be empty")
 )
 
 // main business entity
 type Expense struct {
 	ID       int       `json:"id"`
+	UserID   int       `json:"user_id"`
 	Date     time.Time `json:"date"`
 	Amount   float64   `json:"amount"`
 	Category string    `json:"category"`
