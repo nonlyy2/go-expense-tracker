@@ -2,91 +2,105 @@ package main
 
 import (
 	"bufio"
-	"context"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
-
-	"go-expense-tracker/internal/service"
+	"time"
 )
 
-func RunMenu(svc *service.ExpenseService) {
-	reader := bufio.NewReader(os.Stdin)
-	ctx := context.Background()
+type Expense struct {
+	ID       int       `json:"id"`
+	Date     time.Time `json:"date"`
+	Amount   float64   `json:"amount"`
+	Category string    `json:"category"`
+	Comment  string    `json:"comment"`
+}
 
-	fmt.Println("Добро пожаловать в Expense Tracker (Clean Arch Edition)!")
+func RunMenu() {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Добро пожаловать в Expense Tracker!")
 
 	for {
 		fmt.Println("\nМеню:")
-		fmt.Println("  1. Добавить расход")
-		fmt.Println("  2. Показать все расходы")
-		fmt.Println("  3. Сумма расходов")
-		fmt.Println("  4. Обновить расход")
-		fmt.Println("  5. Удалить расход")
+		fmt.Println("  1. Добавить расход (POST)")
+		fmt.Println("  2. Показать все расходы (GET)")
 		fmt.Println("  0. Выход")
-		fmt.Print("Выберите пункт (введите цифру): ")
+		fmt.Print("Выберите пункт: ")
 
-		choice, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println("Ошибка ввода: ", err)
-			continue
-		}
-
+		choice, _ := reader.ReadString('\n')
 		choice = strings.TrimSpace(choice)
 
 		switch choice {
-		case "1": // add expense
+		case "1":
 			fmt.Print("Введите категорию: ")
 			cat, _ := reader.ReadString('\n')
 			cat = strings.TrimSpace(cat)
 
-			fmt.Print("Введите цену покупки: ")
+			fmt.Print("Введите цену: ")
 			amStr, _ := reader.ReadString('\n')
 			amount, _ := strconv.ParseFloat(strings.TrimSpace(amStr), 64)
 
-			fmt.Print("Введите доп. информацию: ")
+			fmt.Print("Введите коммент: ")
 			comm, _ := reader.ReadString('\n')
 			comm = strings.TrimSpace(comm)
 
-			_, err := svc.CreateExpense(ctx, cat, amount, comm)
+			// form query body
+			reqBody, _ := json.Marshal(map[string]interface{}{
+				"category": cat,
+				"amount":   amount,
+				"comment":  comm,
+			})
+
+			// send post query
+			resp, err := http.Post(baseURL, "application/json", bytes.NewBuffer(reqBody))
 			if err != nil {
-				fmt.Printf("❌ Ошибка сохранения: %v\n", err)
+				fmt.Println("❌ Ошибка соединения с сервером. Сервер запущен?")
+				continue
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusCreated {
+				fmt.Println("✅ Запись успешно добавлена в БД!")
 			} else {
-				fmt.Println("✅ Запись добавлена!")
+				body, _ := io.ReadAll(resp.Body)
+				fmt.Printf("❌ Ошибка сервера: %s\n", string(body))
 			}
 
-		case "2": // show expenses
-			expenses, err := svc.GetAllExpenses(ctx)
+		case "2":
+			// send get query
+			resp, err := http.Get(baseURL)
 			if err != nil {
-				fmt.Println("❌ Ошибка получения данных:", err)
+				fmt.Println("❌ Ошибка соединения с сервером. Сервер запущен?")
+				continue
+			}
+			defer resp.Body.Close()
+
+			// read and parse ans
+			body, _ := io.ReadAll(resp.Body)
+			var expenses []Expense
+			if err := json.Unmarshal(body, &expenses); err != nil {
+				fmt.Println("❌ Ошибка парсинга данных")
 				continue
 			}
 
-			fmt.Println("Твои расходы:\n------------------------------------------------")
+			fmt.Println("Твои расходы из БД:\n------------------------------------------------")
 			for _, e := range expenses {
 				fmt.Printf("ID: %d | %s | %.2f тнг | %s | %s\n",
 					e.ID, e.Date.Format("02 Jan 15:04"), e.Amount, e.Category, e.Comment)
 			}
 			fmt.Println("------------------------------------------------")
 
-		case "3": // calculate total
-			total, err := svc.GetTotal(ctx)
-			if err != nil {
-				fmt.Println("❌ Ошибка подсчета:", err)
-			} else {
-				fmt.Printf("💰 Общая сумма расходов: %.2f\n", total)
-			}
-
-		case "4", "5":
-			fmt.Println("new CLI in development. use REST API.")
-
-		case "0": // exit
+		case "0":
 			fmt.Println("Пока!")
 			return
 
-		default: // other cases
-			fmt.Println("❌ Неверная команда, попробуй еще раз.")
+		default:
+			fmt.Println("❌ Неверная команда.")
 		}
 	}
 }

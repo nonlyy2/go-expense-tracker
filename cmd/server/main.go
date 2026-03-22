@@ -6,17 +6,20 @@ import (
 	"net/http"
 
 	"go-expense-tracker/internal/handler"
-	jsonrepo "go-expense-tracker/internal/repository/json"
+	postgresrepo "go-expense-tracker/internal/repository/postgres"
 	"go-expense-tracker/internal/service"
 )
 
 func main() {
-	fmt.Println("Starting Expense Tracker API...")
+	fmt.Println("Starting Expense Tracker API with PostgreSQL...")
 
-	// create repo first, and read expenses.json(creates if does not exist)
-	repo, err := jsonrepo.NewExpenseRepo("expenses.json")
+	// format: postgres://login:pass@host:port/db_name?sslmode=disable
+	dsn := "postgres://postgres:qwerty@localhost:5433/expense_tracker?sslmode=disable"
+
+	// create repo to work with PostreSQL
+	repo, err := postgresrepo.NewExpenseRepo(dsn)
 	if err != nil {
-		log.Fatalf("Failed to initialize repository: %v", err)
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
 	// create service
@@ -25,14 +28,12 @@ func main() {
 	// create handler
 	apiHandler := handler.NewExpenseHandler(svc)
 
-	// create mux(router)
+	// create router
 	mux := http.NewServeMux()
-
-	// handler register all routes in router
 	apiHandler.RegisterRoutes(mux)
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Welcome to Clean Architecture Expense Tracker API!\nUse /api/v1/expenses")
+		fmt.Fprintf(w, "Welcome to Expense Tracker API with PostgreSQL!\n")
 	})
 
 	// launch server
