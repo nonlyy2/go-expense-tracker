@@ -5,5 +5,19 @@
     "amount": 1450,
     "category": "taxi",
     "comment": "do dorma"
+  },
+  {
+    "id": 2,
+    "date": "2026-03-22T12:41:56.146376+05:00",
+    "amount": 1500,
+    "category": "Food",
+    "comment": "Шаурма"
+  },
+  {
+    "id": 3,
+    "date": "2026-03-22T12:45:46.485818+05:00",
+    "amount": 1100,
+    "category": "food",
+    "comment": "corner meal"
   }
 ]

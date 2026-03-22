@@ -2,17 +2,21 @@ package main
 
 import (
 	"fmt"
-	"go-expense-tracker/internal/storage"
+	"log"
+
+	jsonrepo "go-expense-tracker/internal/repository/json"
+	"go-expense-tracker/internal/service"
 )
 
 func main() {
-	// upload json files to slices
-	expenses, err := storage.LoadExpenses()
+	repo, err := jsonrepo.NewExpenseRepo("expenses.json")
 	if err != nil {
-		fmt.Println("Ошибка при загрузке json файла")
-		return
+		log.Fatalf("Ошибка при загрузке json файла: %v", err)
 	}
-	fmt.Printf("Загружено расходов: %d\n", len(expenses))
 
-	RunMenu(expenses)
+	svc := service.NewExpenseService(repo)
+
+	fmt.Println("Данные успешно загружены!")
+
+	RunMenu(svc)
 }

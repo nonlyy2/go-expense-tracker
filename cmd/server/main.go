@@ -1,127 +1,45 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
-	"strconv"
+
+	"go-expense-tracker/internal/handler"
+	jsonrepo "go-expense-tracker/internal/repository/json"
+	"go-expense-tracker/internal/service"
 )
 
-type Expense struct {
-	ID       int     `json:"id"`
-	Category string  `json:"category"`
-	Amount   float64 `json:"amount"`
-}
-
-var expenses = []Expense{
-	{ID: 1, Category: "Такси до NU", Amount: 2000.0},
-	{ID: 2, Category: "Кофе перед митингом", Amount: 1800.0},
-	{ID: 3, Category: "Подписка на AI", Amount: 5000.0},
-}
-
 func main() {
+	fmt.Println("Starting Expense Tracker API...")
+
+	// create repo first, and read expenses.json(creates if does not exist)
+	repo, err := jsonrepo.NewExpenseRepo("expenses.json")
+	if err != nil {
+		log.Fatalf("Failed to initialize repository: %v", err)
+	}
+
+	// create service
+	svc := service.NewExpenseService(repo)
+
+	// create handler
+	apiHandler := handler.NewExpenseHandler(svc)
+
+	// create mux(router)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /expenses", createExpensesHandler)
-	mux.HandleFunc("GET /expenses", getExpensesHandler)
-	mux.HandleFunc("GET /expenses/{id}", getExpenseByIDHandler)
-	mux.HandleFunc("PUT /expenses/{id}", updateExpenseHandler)
-	mux.HandleFunc("DELETE /expenses/{id}", deleteExpenseHandler)
+	// handler register all routes in router
+	apiHandler.RegisterRoutes(mux)
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Halo, my server is working now!\nGo to /expenses to see the expenses")
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Welcome to Clean Architecture Expense Tracker API!\nUse /api/v1/expenses")
 	})
 
-	fmt.Println("Server is running on http://localhost:8080 ...")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		panic(err)
+	// launch server
+	port := ":8080"
+	fmt.Printf("Server is running on http://localhost%s ...\n", port)
+
+	if err := http.ListenAndServe(port, mux); err != nil {
+		log.Fatalf("Server crashed: %v", err)
 	}
-}
-
-// create expense (post)
-func createExpensesHandler(w http.ResponseWriter, r *http.Request) {
-	var newExpense Expense
-	if err := json.NewDecoder(r.Body).Decode(&newExpense); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	newExpense.ID = len(expenses) + 1
-	expenses = append(expenses, newExpense)
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newExpense)
-}
-
-// show all expenses (get)
-func getExpensesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(expenses)
-}
-
-// show expense by exact id (get)
-func getExpenseByIDHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
-		return
-	}
-
-	for _, expense := range expenses {
-		if expense.ID == id {
-			w.Header().Set("Content-type", "application/json")
-			json.NewEncoder(w).Encode(expense)
-			return
-		}
-	}
-
-	http.Error(w, "Expense not found", http.StatusNotFound)
-}
-
-// update expense by id (put)
-func updateExpenseHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
-		return
-	}
-
-	var updatedExpense Expense
-	if err := json.NewDecoder(r.Body).Decode(&updatedExpense); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-
-	for i, expense := range expenses {
-		if expense.ID == id {
-			updatedExpense.ID = id
-			expenses[i] = updatedExpense
-
-			w.Header().Set("Content-type", "application/json")
-			json.NewEncoder(w).Encode(updatedExpense)
-			return
-		}
-	}
-
-	http.Error(w, "Expense not found", http.StatusNotFound)
-}
-
-// delete expense by id (delete)
-func deleteExpenseHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
-		return
-	}
-
-	for i, expense := range expenses {
-		if expense.ID == id {
-			expenses = append(expenses[:i], expenses[i+1:]...)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-	}
-
-	http.Error(w, "Expense not found", http.StatusNotFound)
 }
