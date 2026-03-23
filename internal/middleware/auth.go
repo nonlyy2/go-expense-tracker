@@ -15,20 +15,26 @@ const UserIDKey contextKey = "userID"
 
 func RequireAuth(authService *service.AuthService, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// try to get token
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "missing authorization header", http.StatusUnauthorized)
-			return
+		var tokenString string
+
+		// try cookie first (browser / OAuth flow)
+		if cookie, err := r.Cookie("token"); err == nil {
+			tokenString = cookie.Value
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
-			return
+		// fallback to authorization header (CLI / API clients)
+		if tokenString == "" {
+			authHeader := r.Header.Get("Authorization")
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+			}
 		}
 
-		tokenString := parts[1]
+		if tokenString == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		// check token
 		userID, err := authService.VerifyToken(tokenString)
@@ -37,12 +43,8 @@ func RequireAuth(authService *service.AuthService, next http.HandlerFunc) http.H
 			return
 		}
 
-		// valid token
 		ctx := context.WithValue(r.Context(), UserIDKey, userID)
-		r = r.WithContext(ctx)
-
-		// trasmit to expense handler
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }
 
