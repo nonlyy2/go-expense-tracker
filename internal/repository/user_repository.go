@@ -12,4 +12,5 @@ type UserRepository interface {
 
 	GetByOAuth(ctx context.Context, provider, oauthID string) (*domain.User, error)
 	CreateOAuth(ctx context.Context, user *domain.User) error
+	LinkOAuth(ctx context.Context, userID int, provider, oauthID string) error
 }

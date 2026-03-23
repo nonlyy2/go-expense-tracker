@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
+	"go-expense-tracker/internal/config"
 	"go-expense-tracker/internal/handler"
 	"go-expense-tracker/internal/middleware"
 	postgresrepo "go-expense-tracker/internal/repository/postgres"
@@ -12,56 +14,74 @@ import (
 )
 
 func main() {
-	fmt.Println("Starting Expense Tracker API with PostgreSQL...")
+	fmt.Println("Starting Expense Tracker...")
 
-	// format: postgres://login:pass@host:port/db_name?sslmode=disable
-	dsn := "postgres://postgres:qwerty@localhost:5433/expense_tracker?sslmode=disable"
+	cfg := config.LoadConfig()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://postgres:qwerty@localhost:5433/expense_tracker?sslmode=disable"
+	}
 
-	// create repo to work with PostreSQL
+	// DB connection and migrations
 	repo, err := postgresrepo.NewExpenseRepo(dsn)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatalf("DB connection failed: %v", err)
 	}
-
-	if err := postgresrepo.RunMigrations(repo.DB(), "migrations"); err != nil {
-		log.Fatalf("Failed to run migrations: %v", err)
-	}
-
-	// create service
-	svc := service.NewExpenseService(repo)
-
-	// create handler
-	apiHandler := handler.NewExpenseHandler(svc)
-
-	// create router
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Welcome to Expense Tracker API with PostgreSQL!\n")
-	})
-
-	// secret JWT key
-	jwtSecret := "super-secret-jwt-key-for-my-app"
-
 	db := repo.DB()
+	if err := postgresrepo.RunMigrations(db, "migrations"); err != nil {
+		log.Fatalf("Migrations failed: %v", err)
+	}
 
+	// Repos and services
 	userRepo := postgresrepo.NewUserRepo(db)
-	authSvc := service.NewAuthService(userRepo, jwtSecret)
+	svc := service.NewExpenseService(repo)
+	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+	oauthService := service.NewOAuthService(cfg, userRepo)
+
+	// Handlers
+	apiHandler := handler.NewExpenseHandler(svc)
 	authHandler := handler.NewAuthHandler(authSvc)
+	oauthHandler := handler.NewOAuthHandler(oauthService)
+	webPageHandler := handler.NewWebPageHandler(svc, authSvc)
+	webExpenseHandler := handler.NewWebExpenseHandler(svc, authSvc)
 
-	authHandler.RegisterRoutes(mux)
-
+	// Auth middleware
 	authMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
 		return middleware.RequireAuth(authSvc, next)
 	}
 
-	// transmit middleware to expense handler
+	mux := http.NewServeMux()
+
+	// Web pages
+	mux.HandleFunc("GET /{$}", webPageHandler.HandleIndex)
+	mux.HandleFunc("GET /login", webPageHandler.HandleLogin)
+	mux.HandleFunc("GET /register", webPageHandler.HandleRegister)
+	mux.HandleFunc("GET /expenses", authMiddleware(webPageHandler.HandleExpenses))
+
+	// Web form handlers (HTMX)
+	mux.HandleFunc("POST /web/auth/login", webExpenseHandler.HandleWebLogin)
+	mux.HandleFunc("POST /web/auth/register", webExpenseHandler.HandleWebRegister)
+	mux.HandleFunc("POST /web/auth/logout", webExpenseHandler.HandleWebLogout)
+	mux.HandleFunc("POST /expenses", authMiddleware(webExpenseHandler.HandleCreate))
+	mux.HandleFunc("DELETE /expenses/{id}", authMiddleware(webExpenseHandler.HandleDelete))
+
+	// OAuth
+	mux.HandleFunc("GET /auth/google/login", oauthHandler.HandleGoogleLogin)
+	mux.HandleFunc("GET /auth/google/callback", oauthHandler.HandleGoogleCallback)
+	mux.HandleFunc("GET /auth/github/login", oauthHandler.HandleGitHubLogin)
+	mux.HandleFunc("GET /auth/github/callback", oauthHandler.HandleGitHubCallback)
+
+	// JSON API
+	authHandler.RegisterRoutes(mux)
 	apiHandler.RegisterRoutes(mux, authMiddleware)
 
-	// launch server
-	port := ":8080"
-	fmt.Printf("Server is running on http://localhost%s ...\n", port)
+	// Start server
+	port := ":" + cfg.ServerPort
+	if cfg.ServerPort == "" {
+		port = ":8080"
+	}
 
+	fmt.Printf("Server running on http://localhost%s\n", port)
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatalf("Server crashed: %v", err)
 	}

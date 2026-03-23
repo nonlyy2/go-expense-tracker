@@ -99,7 +99,7 @@ func (r *userRepo) GetByOAuth(ctx context.Context, provider, oauthID string) (*d
 }
 
 func (r *userRepo) CreateOAuth(ctx context.Context, user *domain.User) error {
-	query := `INSERT INTO users (email, name, oauth_provider, oauth_id) 
+	query := `INSERT INTO users (email, name, oauth_provider, oauth_id)
               VALUES ($1, $2, $3, $4) RETURNING id, created_at`
 
 	err := r.db.QueryRowContext(ctx, query, user.Email, user.Name, user.OAuthProvider, user.OAuthID).
@@ -109,4 +109,10 @@ func (r *userRepo) CreateOAuth(ctx context.Context, user *domain.User) error {
 		return err
 	}
 	return nil
+}
+
+func (r *userRepo) LinkOAuth(ctx context.Context, userID int, provider, oauthID string) error {
+	query := `UPDATE users SET oauth_provider = $1, oauth_id = $2 WHERE id = $3`
+	_, err := r.db.ExecContext(ctx, query, provider, oauthID, userID)
+	return err
 }

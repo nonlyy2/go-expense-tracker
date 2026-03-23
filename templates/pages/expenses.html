@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="max-w-4xl mx-auto mt-8">
+    <h1 class="text-3xl font-bold mb-8 text-gray-800">Управление расходами</h1>
+    
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div class="md:col-span-1">
+            {{template "expense_form" .}}
+        </div>
+        
+        <div class="md:col-span-2">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-bold mb-4 border-b pb-2">История операций</h2>
+                {{template "expense_list" .}}
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

@@ -1,0 +1,9 @@
+{{define "expense_list"}}
+<div id="expense-list" class="space-y-3">
+    {{range .Expenses}}
+        {{template "expense_row" .}}
+    {{else}}
+        <p class="text-gray-500 text-sm italic" id="no-expenses-msg">Расходов пока нет.</p>
+    {{end}}
+</div>
+{{end}}

@@ -101,3 +101,8 @@ func (s *AuthService) VerifyToken(tokenString string) (int, error) {
 
 	return int(sub), nil
 }
+
+// GetUserByID fetches user info by ID (needed for UI)
+func (s *AuthService) GetUserByID(ctx context.Context, id int) (*domain.User, error) {
+	return s.userRepo.GetByID(ctx, id)
+}
