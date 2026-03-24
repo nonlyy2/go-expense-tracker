@@ -1,15 +1,56 @@
 {{define "content"}}
-<div class="max-w-4xl mx-auto mt-8">
-    <h1 class="text-3xl font-bold mb-8 text-gray-800">Управление расходами</h1>
-    
+<div class="max-w-5xl mx-auto mt-8">
+    <h1 class="text-3xl font-bold mb-8 text-gray-800">My Expenses</h1>
+
     <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div class="md:col-span-1">
+        <!-- left: form + summary -->
+        <div class="md:col-span-1 space-y-6">
             {{template "expense_form" .}}
+
+            {{if .Summary}}
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h3 class="text-lg font-bold mb-3 border-b pb-2">By Category</h3>
+                {{range .Summary}}
+                <div class="flex justify-between py-2 border-b border-gray-100 last:border-0">
+                    <span class="text-gray-700">{{.Category}} <span class="text-xs text-gray-400">({{.Count}})</span></span>
+                    <span class="font-semibold text-gray-800">{{printf "%.2f" .Total}} &#8376;</span>
+                </div>
+                {{end}}
+            </div>
+            {{end}}
         </div>
-        
+
+        <!-- right: filters + list -->
         <div class="md:col-span-2">
             <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-xl font-bold mb-4 border-b pb-2">История операций</h2>
+                <h2 class="text-xl font-bold mb-4 border-b pb-2">Transaction History</h2>
+
+                <!-- filters -->
+                <div class="flex gap-3 mb-4" id="filter-bar">
+                    <select name="sort"
+                            hx-get="/expenses/list"
+                            hx-target="#expense-list"
+                            hx-swap="outerHTML"
+                            hx-include="#filter-bar"
+                            class="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="date_desc">Newest first</option>
+                        <option value="date_asc">Oldest first</option>
+                        <option value="amount_desc">Highest amount</option>
+                        <option value="amount_asc">Lowest amount</option>
+                    </select>
+                    <select name="category"
+                            hx-get="/expenses/list"
+                            hx-target="#expense-list"
+                            hx-swap="outerHTML"
+                            hx-include="#filter-bar"
+                            class="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">All categories</option>
+                        {{range .Categories}}
+                        <option value="{{.}}">{{.}}</option>
+                        {{end}}
+                    </select>
+                </div>
+
                 {{template "expense_list" .}}
             </div>
         </div>

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -10,6 +12,41 @@ import (
 	"go-expense-tracker/internal/domain"
 	"go-expense-tracker/internal/repository"
 )
+
+func validatePassword(password string) error {
+	if len(password) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	if len(password) > 32 {
+		return errors.New("password must be at most 32 characters")
+	}
+	var upper, lower, digit, special bool
+	for _, c := range password {
+		switch {
+		case unicode.IsUpper(c):
+			upper = true
+		case unicode.IsLower(c):
+			lower = true
+		case unicode.IsDigit(c):
+			digit = true
+		case unicode.IsPunct(c) || unicode.IsSymbol(c):
+			special = true
+		}
+	}
+	if !upper {
+		return errors.New("password must contain an uppercase letter")
+	}
+	if !lower {
+		return errors.New("password must contain a lowercase letter")
+	}
+	if !digit {
+		return errors.New("password must contain a digit")
+	}
+	if !special {
+		return errors.New("password must contain a special character")
+	}
+	return nil
+}
 
 type AuthService struct {
 	userRepo  repository.UserRepository
@@ -23,10 +60,13 @@ func NewAuthService(userRepo repository.UserRepository, jwtSecret string) *AuthS
 	}
 }
 
-// Register creates user, hash the pass
+// Register creates user with validated password
 func (s *AuthService) Register(ctx context.Context, email, password, name string) (*domain.User, error) {
-	if email == "" || len(password) < 6 {
+	if email == "" {
 		return nil, domain.ErrInvalidCreds
+	}
+	if err := validatePassword(password); err != nil {
+		return nil, err
 	}
 
 	// hash pass by DefaultCost

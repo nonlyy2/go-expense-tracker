@@ -42,7 +42,7 @@ func main() {
 	apiHandler := handler.NewExpenseHandler(svc)
 	authHandler := handler.NewAuthHandler(authSvc)
 	oauthHandler := handler.NewOAuthHandler(oauthService)
-	webPageHandler := handler.NewWebPageHandler(svc, authSvc)
+	webPageHandler := handler.NewWebPageHandler(svc, authSvc, oauthService)
 	webExpenseHandler := handler.NewWebExpenseHandler(svc, authSvc)
 
 	// Auth middleware
@@ -64,6 +64,7 @@ func main() {
 	mux.HandleFunc("POST /web/auth/logout", webExpenseHandler.HandleWebLogout)
 	mux.HandleFunc("POST /expenses", authMiddleware(webExpenseHandler.HandleCreate))
 	mux.HandleFunc("DELETE /expenses/{id}", authMiddleware(webExpenseHandler.HandleDelete))
+	mux.HandleFunc("GET /expenses/list", authMiddleware(webExpenseHandler.HandleExpenseList))
 
 	// OAuth
 	mux.HandleFunc("GET /auth/google/login", oauthHandler.HandleGoogleLogin)

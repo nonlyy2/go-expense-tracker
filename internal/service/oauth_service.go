@@ -21,6 +21,8 @@ type OAuthService interface {
 	GetGitHubLoginURL(state string) string
 	HandleGoogleCallback(ctx context.Context, code string) (string, error)
 	HandleGitHubCallback(ctx context.Context, code string) (string, error)
+	IsGoogleConfigured() bool
+	IsGitHubConfigured() bool
 }
 
 type oauthService struct {
@@ -49,6 +51,14 @@ func NewOAuthService(cfg *config.Config, userRepo repository.UserRepository) OAu
 		userRepo:  userRepo,
 		jwtSecret: cfg.JWTSecret,
 	}
+}
+
+func (s *oauthService) IsGoogleConfigured() bool {
+	return s.googleConfig.ClientID != ""
+}
+
+func (s *oauthService) IsGitHubConfigured() bool {
+	return s.githubConfig.ClientID != ""
 }
 
 func (s *oauthService) GetGoogleLoginURL(state string) string {

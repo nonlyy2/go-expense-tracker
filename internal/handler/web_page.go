@@ -3,7 +3,9 @@ package handler
 import (
 	"html/template"
 	"net/http"
+	"sort"
 
+	"go-expense-tracker/internal/domain"
 	"go-expense-tracker/internal/middleware"
 	"go-expense-tracker/internal/service"
 )
@@ -12,9 +14,14 @@ type WebPageHandler struct {
 	templates      map[string]*template.Template
 	expenseService *service.ExpenseService
 	authService    *service.AuthService
+	oauthService   service.OAuthService
 }
 
-func NewWebPageHandler(expenseService *service.ExpenseService, authService *service.AuthService) *WebPageHandler {
+func NewWebPageHandler(
+	expenseService *service.ExpenseService,
+	authService *service.AuthService,
+	oauthService service.OAuthService,
+) *WebPageHandler {
 	templates := make(map[string]*template.Template)
 
 	pages := []string{"login.html", "register.html", "expenses.html"}
@@ -24,10 +31,8 @@ func NewWebPageHandler(expenseService *service.ExpenseService, authService *serv
 			"templates/layouts/base.html",
 			"templates/pages/" + page,
 		}
-
 		t := template.Must(template.New("base.html").ParseFiles(files...))
 		t = template.Must(t.ParseGlob("templates/partials/*.html"))
-
 		templates[page] = t
 	}
 
@@ -35,12 +40,23 @@ func NewWebPageHandler(expenseService *service.ExpenseService, authService *serv
 		templates:      templates,
 		expenseService: expenseService,
 		authService:    authService,
+		oauthService:   oauthService,
 	}
 }
 
 type PageData struct {
-	User     map[string]interface{}
-	Expenses interface{}
+	User        map[string]interface{}
+	Expenses    []domain.Expense
+	Categories  []string
+	Summary     []CategorySummary
+	GoogleOAuth bool
+	GitHubOAuth bool
+}
+
+type CategorySummary struct {
+	Category string
+	Total    float64
+	Count    int
 }
 
 func (h *WebPageHandler) render(w http.ResponseWriter, page string, data interface{}) {
@@ -63,7 +79,10 @@ func (h *WebPageHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebPageHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "login.html", nil)
+	h.render(w, "login.html", PageData{
+		GoogleOAuth: h.oauthService.IsGoogleConfigured(),
+		GitHubOAuth: h.oauthService.IsGitHubConfigured(),
+	})
 }
 
 func (h *WebPageHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
@@ -90,10 +109,34 @@ func (h *WebPageHandler) HandleExpenses(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// build category list and summary
+	catTotals := make(map[string]*CategorySummary)
+	for _, e := range expenses {
+		cs, ok := catTotals[e.Category]
+		if !ok {
+			cs = &CategorySummary{Category: e.Category}
+			catTotals[e.Category] = cs
+		}
+		cs.Total += e.Amount
+		cs.Count++
+	}
+
+	var summary []CategorySummary
+	var categories []string
+	for _, cs := range catTotals {
+		summary = append(summary, *cs)
+		categories = append(categories, cs.Category)
+	}
+	sort.Slice(summary, func(i, j int) bool { return summary[i].Total > summary[j].Total })
+	sort.Strings(categories)
+
+	// default sort: newest first
+	sort.Slice(expenses, func(i, j int) bool { return expenses[i].Date.After(expenses[j].Date) })
+
 	h.render(w, "expenses.html", PageData{
-		User: map[string]interface{}{
-			"Name": user.Name,
-		},
-		Expenses: expenses,
+		User:       map[string]interface{}{"Name": user.Name},
+		Expenses:   expenses,
+		Categories: categories,
+		Summary:    summary,
 	})
 }

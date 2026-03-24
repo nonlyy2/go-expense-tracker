@@ -22,6 +22,10 @@ func NewOAuthHandler(oauthService service.OAuthService) *OAuthHandler {
 // ======
 
 func (h *OAuthHandler) HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.oauthService.IsGoogleConfigured() {
+		http.Error(w, "google oauth is not configured", http.StatusServiceUnavailable)
+		return
+	}
 	state := generateStateOauthCookie(w)
 	url := h.oauthService.GetGoogleLoginURL(state)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
@@ -53,6 +57,10 @@ func (h *OAuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reque
 // ======
 
 func (h *OAuthHandler) HandleGitHubLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.oauthService.IsGitHubConfigured() {
+		http.Error(w, "github oauth is not configured", http.StatusServiceUnavailable)
+		return
+	}
 	state := generateStateOauthCookie(w)
 	url := h.oauthService.GetGitHubLoginURL(state)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
