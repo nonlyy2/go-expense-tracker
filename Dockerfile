@@ -10,5 +10,6 @@ RUN CGO_ENABLED=0 go build -o server ./cmd/server
 FROM alpine:latest
 COPY --from=builder /app/server /server
 COPY --from=builder /app/migrations /migrations
+COPY --from=builder /app/templates /templates
 EXPOSE 8080
 CMD ["/server"]
