@@ -1,9 +1,33 @@
 {{define "expense_list"}}
-<div id="expense-list" class="space-y-3">
-    {{range .Expenses}}
-        {{template "expense_row" .}}
+<div id="expense-list" class="space-y-1">
+    {{if .DayGroups}}
+        {{range .DayGroups}}
+            {{if .MonthLabel}}
+            <div class="flex items-center gap-3 pt-4 pb-1 first:pt-0">
+                <span class="text-xs font-bold uppercase tracking-widest text-indigo-500">{{.MonthLabel}}</span>
+                <div class="flex-1 h-px bg-indigo-100"></div>
+            </div>
+            {{end}}
+            <div class="mb-1">
+                <div class="flex items-center justify-between px-1 py-1.5">
+                    <span class="text-xs font-semibold text-gray-500">{{.Day}}</span>
+                    <span class="text-xs text-gray-400">{{printf "%.0f" .Total}} &#8376;</span>
+                </div>
+                <div class="space-y-1.5">
+                    {{range .Expenses}}
+                        {{template "expense_row" .}}
+                    {{end}}
+                </div>
+            </div>
+        {{end}}
+    {{else if .Expenses}}
+        {{range .Expenses}}
+            {{template "expense_row" .}}
+        {{else}}
+            <p class="text-gray-500 text-sm italic">No expenses yet.</p>
+        {{end}}
     {{else}}
-        <p class="text-gray-500 text-sm italic" id="no-expenses-msg">No expenses yet.</p>
+        <p class="text-gray-500 text-sm italic">No expenses yet.</p>
     {{end}}
 </div>
 {{end}}
