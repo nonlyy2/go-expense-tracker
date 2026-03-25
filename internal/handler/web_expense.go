@@ -105,7 +105,7 @@ func (h *WebExpenseHandler) HandleWebLogout(w http.ResponseWriter, r *http.Reque
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// HandleCreate parses form, creates expense, returns expense_row partial
+// HandleCreate parses form, creates expense, returns full grouped list
 func (h *WebExpenseHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == 0 {
@@ -120,13 +120,20 @@ func (h *WebExpenseHandler) HandleCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	expense, err := h.expenseService.CreateExpense(r.Context(), r.FormValue("category"), amount, r.FormValue("comment"), userID)
-	if err != nil {
+	if _, err := h.expenseService.CreateExpense(r.Context(), r.FormValue("category"), amount, r.FormValue("comment"), userID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	h.rowTemplate.ExecuteTemplate(w, "expense_row", expense)
+	// return full updated list so grouping stays consistent
+	expenses, err := h.expenseService.GetAllExpenses(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	sort.Slice(expenses, func(i, j int) bool { return expenses[i].Date.After(expenses[j].Date) })
+
+	h.listTemplate.ExecuteTemplate(w, "expense_list", struct{ DayGroups []DayGroup }{groupByDay(expenses)})
 }
 
 // HandleDelete removes expense, returns empty for htmx swap
@@ -188,9 +195,11 @@ func (h *WebExpenseHandler) HandleExpenseList(w http.ResponseWriter, r *http.Req
 		sort.Slice(expenses, func(i, j int) bool { return expenses[i].Date.After(expenses[j].Date) })
 	}
 
-	data := struct {
-		Expenses []domain.Expense
-	}{Expenses: expenses}
-
-	h.listTemplate.ExecuteTemplate(w, "expense_list", data)
+	// for amount sorts pass flat list; for date sorts group by day
+	sortParam := r.URL.Query().Get("sort")
+	if sortParam == "amount_desc" || sortParam == "amount_asc" {
+		h.listTemplate.ExecuteTemplate(w, "expense_list", struct{ Expenses []domain.Expense }{expenses})
+		return
+	}
+	h.listTemplate.ExecuteTemplate(w, "expense_list", struct{ DayGroups []DayGroup }{groupByDay(expenses)})
 }
