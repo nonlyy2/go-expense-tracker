@@ -85,6 +85,18 @@ func (s *ExpenseService) DeleteExpense(ctx context.Context, id int, userID int) 
 	return s.repo.Delete(ctx, id, userID)
 }
 
+func (s *ExpenseService) GetMonthlyStats(ctx context.Context, userID int) ([]domain.MonthlyStat, error) {
+	return s.repo.GetMonthlyStats(ctx, userID)
+}
+
+func (s *ExpenseService) GetCategoryStats(ctx context.Context, userID int) ([]domain.CategoryStat, error) {
+	return s.repo.GetCategoryStats(ctx, userID)
+}
+
+func (s *ExpenseService) GetMonthlyCategoryStats(ctx context.Context, userID int) ([]domain.MonthCategoryStat, error) {
+	return s.repo.GetMonthlyCategoryStats(ctx, userID)
+}
+
 // calc total amount of expenses
 func (s *ExpenseService) GetTotal(ctx context.Context, userID int) (float64, error) {
 	expenses, err := s.repo.GetAll(ctx, userID)
