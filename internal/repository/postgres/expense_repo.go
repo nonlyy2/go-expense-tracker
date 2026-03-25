@@ -130,6 +130,69 @@ func (r *expenseRepo) Update(ctx context.Context, expense *domain.Expense) error
 	return nil
 }
 
+func (r *expenseRepo) GetMonthlyStats(ctx context.Context, userID int) ([]domain.MonthlyStat, error) {
+	query := `SELECT TO_CHAR(date, 'YYYY-MM') AS month, SUM(amount) AS total
+	          FROM expenses WHERE user_id = $1
+	          GROUP BY month ORDER BY month`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []domain.MonthlyStat
+	for rows.Next() {
+		var s domain.MonthlyStat
+		if err := rows.Scan(&s.Month, &s.Total); err != nil {
+			return nil, err
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+func (r *expenseRepo) GetMonthlyCategoryStats(ctx context.Context, userID int) ([]domain.MonthCategoryStat, error) {
+	query := `SELECT TO_CHAR(date, 'YYYY-MM') AS month, category, SUM(amount) AS total
+	          FROM expenses WHERE user_id = $1
+	          GROUP BY month, category ORDER BY month, category`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []domain.MonthCategoryStat
+	for rows.Next() {
+		var s domain.MonthCategoryStat
+		if err := rows.Scan(&s.Month, &s.Category, &s.Total); err != nil {
+			return nil, err
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+func (r *expenseRepo) GetCategoryStats(ctx context.Context, userID int) ([]domain.CategoryStat, error) {
+	query := `SELECT category, SUM(amount) AS total, COUNT(*) AS count
+	          FROM expenses WHERE user_id = $1
+	          GROUP BY category ORDER BY total DESC`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []domain.CategoryStat
+	for rows.Next() {
+		var s domain.CategoryStat
+		if err := rows.Scan(&s.Category, &s.Total, &s.Count); err != nil {
+			return nil, err
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
 func (r *expenseRepo) Delete(ctx context.Context, id int, userID int) error {
 	query := `DELETE FROM expenses WHERE id = $1 AND user_id = $2`
 
