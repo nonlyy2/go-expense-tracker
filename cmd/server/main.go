@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -47,6 +51,7 @@ func main() {
 	apiHandler := handler.NewExpenseHandler(svc)
 	authHandler := handler.NewAuthHandler(authSvc)
 	oauthHandler := handler.NewOAuthHandler(oauthService)
+	statsHandler := handler.NewStatsHandler(svc)
 	webPageHandler := handler.NewWebPageHandler(svc, authSvc, oauthService)
 	webExpenseHandler := handler.NewWebExpenseHandler(svc, authSvc)
 
@@ -61,6 +66,7 @@ func main() {
 	mux.HandleFunc("GET /{$}", webPageHandler.HandleIndex)
 	mux.HandleFunc("GET /login", webPageHandler.HandleLogin)
 	mux.HandleFunc("GET /register", webPageHandler.HandleRegister)
+	mux.HandleFunc("GET /dashboard", authMiddleware(webPageHandler.HandleDashboard))
 	mux.HandleFunc("GET /expenses", authMiddleware(webPageHandler.HandleExpenses))
 
 	// Web form handlers (HTMX)
@@ -80,15 +86,37 @@ func main() {
 	// JSON API
 	authHandler.RegisterRoutes(mux)
 	apiHandler.RegisterRoutes(mux, authMiddleware)
+	statsHandler.RegisterRoutes(mux, authMiddleware)
 
-	// Start server
 	port := ":" + cfg.ServerPort
 	if cfg.ServerPort == "" {
 		port = ":8080"
 	}
 
-	fmt.Printf("Server running on http://localhost%s\n", port)
-	if err := http.ListenAndServe(port, mux); err != nil {
-		log.Fatalf("Server crashed: %v", err)
+	// rate limiter: 10 req/sec, burst 20
+	rl := middleware.NewRateLimiter(10, 20)
+
+	srv := &http.Server{
+		Addr:    port,
+		Handler: middleware.Logging(rl.Middleware(mux)),
 	}
+
+	go func() {
+		fmt.Printf("Server running on http://localhost%s\n", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server crashed: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	fmt.Println("shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("server forced to shutdown: %v", err)
+	}
+	fmt.Println("server stopped gracefully")
 }
