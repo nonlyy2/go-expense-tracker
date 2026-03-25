@@ -24,7 +24,7 @@ func NewWebPageHandler(
 ) *WebPageHandler {
 	templates := make(map[string]*template.Template)
 
-	pages := []string{"login.html", "register.html", "expenses.html"}
+	pages := []string{"login.html", "register.html", "expenses.html", "dashboard.html"}
 
 	for _, page := range pages {
 		files := []string{
@@ -47,6 +47,7 @@ func NewWebPageHandler(
 type PageData struct {
 	User        map[string]interface{}
 	Expenses    []domain.Expense
+	DayGroups   []DayGroup
 	Categories  []string
 	Summary     []CategorySummary
 	GoogleOAuth bool
@@ -57,6 +58,41 @@ type CategorySummary struct {
 	Category string
 	Total    float64
 	Count    int
+}
+
+type DayGroup struct {
+	Day        string // e.g. "Monday, 15 April"
+	MonthLabel string // e.g. "April 2025" — non-empty only when month changes
+	Total      float64
+	Expenses   []domain.Expense
+}
+
+// groupByDay groups an already-sorted expense slice into day buckets.
+// MonthLabel is set only on the first group of each month.
+func groupByDay(expenses []domain.Expense) []DayGroup {
+	var groups []DayGroup
+	var prevKey, prevMonth string
+
+	for _, e := range expenses {
+		key := e.Date.Format("2006-01-02")
+		if key != prevKey {
+			month := e.Date.Format("January 2006")
+			monthLabel := ""
+			if month != prevMonth {
+				monthLabel = month
+				prevMonth = month
+			}
+			groups = append(groups, DayGroup{
+				Day:        e.Date.Format("Monday, 2 January"),
+				MonthLabel: monthLabel,
+			})
+			prevKey = key
+		}
+		g := &groups[len(groups)-1]
+		g.Total += e.Amount
+		g.Expenses = append(g.Expenses, e)
+	}
+	return groups
 }
 
 func (h *WebPageHandler) render(w http.ResponseWriter, page string, data interface{}) {
@@ -75,7 +111,24 @@ func (h *WebPageHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/expenses", http.StatusSeeOther)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (h *WebPageHandler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == 0 {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, err := h.authService.GetUserByID(r.Context(), userID)
+	if err != nil {
+		http.SetCookie(w, &http.Cookie{Name: "token", MaxAge: -1, Path: "/"})
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	h.render(w, "dashboard.html", PageData{
+		User: map[string]interface{}{"Name": user.Name},
+	})
 }
 
 func (h *WebPageHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +188,7 @@ func (h *WebPageHandler) HandleExpenses(w http.ResponseWriter, r *http.Request) 
 
 	h.render(w, "expenses.html", PageData{
 		User:       map[string]interface{}{"Name": user.Name},
-		Expenses:   expenses,
+		DayGroups:  groupByDay(expenses),
 		Categories: categories,
 		Summary:    summary,
 	})
