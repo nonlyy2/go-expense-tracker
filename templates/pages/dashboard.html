@@ -1,0 +1,210 @@
+{{define "content"}}
+<div class="space-y-6">
+    <h1 class="text-2xl font-bold">Dashboard</h1>
+
+    <!-- summary cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">This month</p>
+            <p class="text-2xl font-bold text-indigo-600" id="month-total">—</p>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Avg per day</p>
+            <p class="text-2xl font-bold text-indigo-600" id="avg-daily">—</p>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Peak month</p>
+            <p class="text-xl font-bold text-red-500" id="peak-month">—</p>
+            <p class="text-sm text-gray-400 mt-0.5" id="peak-amount"></p>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Top category</p>
+            <p class="text-xl font-bold text-indigo-600" id="top-category">—</p>
+        </div>
+    </div>
+
+    <!-- charts row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- stacked bar: 2/3 -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+            <h2 class="text-base font-semibold mb-4 text-gray-700">Monthly expenses</h2>
+            <div style="position:relative;height:320px;">
+                <canvas id="monthlyChart"></canvas>
+            </div>
+        </div>
+        <!-- pie: 1/3 -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+            <h2 class="text-base font-semibold mb-4 text-gray-700">By category</h2>
+            <div style="position:relative;height:320px;">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- leaderboard -->
+    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+        <h2 class="text-base font-semibold mb-4 text-gray-700">Category breakdown</h2>
+        <div id="leaderboard" class="space-y-3"></div>
+    </div>
+</div>
+
+<!-- Chart.js + datalabels (CDN auto-registers the plugin) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script>
+const PALETTE = [
+    '#6366f1','#ec4899','#f59e0b','#10b981',
+    '#3b82f6','#8b5cf6','#ef4444','#14b8a6',
+    '#f97316','#06b6d4','#84cc16','#a78bfa',
+];
+
+function monthLabel(ym) {
+    const [y, m] = ym.split('-');
+    return new Date(parseInt(y), parseInt(m) - 1, 1)
+        .toLocaleString('en-US', { month: 'long' });
+}
+function fmt(n) { return Math.round(n).toLocaleString() + ' ₸'; }
+
+async function loadDashboard() {
+    try {
+        const [mr, cr, mcr] = await Promise.all([
+            fetch('/api/v1/stats/monthly',             { credentials: 'same-origin' }),
+            fetch('/api/v1/stats/by-category',         { credentials: 'same-origin' }),
+            fetch('/api/v1/stats/monthly-by-category', { credentials: 'same-origin' }),
+        ]);
+        if (!mr.ok || !cr.ok || !mcr.ok) { console.error('stats fetch failed'); return; }
+
+        const monthly    = (await mr.json())  || [];
+        const rawCats    = (await cr.json())  || [];
+        const monthlyCat = (await mcr.json()) || [];
+
+        if (!monthly.length || !rawCats.length) return;
+
+        // ── 1. merge categories < 3% into "Other" ─────────────────────────
+        const totalRaw = rawCats.reduce((s, c) => s + c.total, 0);
+        const bigSet   = new Set(rawCats.filter(c => c.total / totalRaw * 100 >= 3).map(c => c.category));
+        const remap    = name => bigSet.has(name) ? name : 'Other';
+
+        // build merged category list
+        const catMap = {};
+        rawCats.forEach(c => {
+            const key = remap(c.category);
+            if (!catMap[key]) catMap[key] = { category: key, total: 0, count: 0 };
+            catMap[key].total += c.total;
+            catMap[key].count += c.count || 0;
+        });
+        const categories = Object.values(catMap).sort((a, b) => b.total - a.total);
+        const catNames   = categories.map(c => c.category);
+        const totalAll   = categories.reduce((s, c) => s + c.total, 0);
+
+        // color map (stable order)
+        const colorMap = {};
+        catNames.forEach((n, i) => { colorMap[n] = PALETTE[i % PALETTE.length]; });
+
+        // ── 2. summary cards ───────────────────────────────────────────────
+        const last = monthly[monthly.length - 1];
+        document.getElementById('month-total').textContent = fmt(last.total);
+        const [ly, lm] = last.month.split('-');
+        const days = new Date(parseInt(ly), parseInt(lm), 0).getDate();
+        document.getElementById('avg-daily').textContent = fmt(last.total / days);
+
+        const peak = monthly.reduce((mx, x) => x.total > mx.total ? x : mx, monthly[0]);
+        document.getElementById('peak-month').textContent  = monthLabel(peak.month);
+        document.getElementById('peak-amount').textContent = fmt(peak.total);
+        document.getElementById('top-category').textContent = categories[0]?.category || '—';
+
+        // ── 3. stacked bar ─────────────────────────────────────────────────
+        // remap all monthly-by-cat rows to merged categories
+        const lookup = {};
+        monthlyCat.forEach(r => {
+            const k = r.month + '|' + remap(r.category);
+            lookup[k] = (lookup[k] || 0) + r.total;
+        });
+
+        const monthKeys = monthly.map(m => m.month);
+        const datasets  = catNames.map(cat => ({
+            label: cat,
+            data: monthKeys.map(mo => lookup[mo + '|' + cat] || 0),
+            backgroundColor: colorMap[cat],
+            borderWidth: 0,
+        }));
+
+        new Chart(document.getElementById('monthlyChart'), {
+            type: 'bar',
+            data: { labels: monthKeys.map(monthLabel), datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+                    datalabels: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            footer: items => 'Total: ' + fmt(items.reduce((s, i) => s + i.raw, 0)),
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: true, grid: { display: false } },
+                    y: { stacked: true, beginAtZero: true,
+                         ticks: { callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v } }
+                }
+            }
+        });
+
+        // ── 4. doughnut with % labels ──────────────────────────────────────
+        new Chart(document.getElementById('categoryChart'), {
+            type: 'doughnut',
+            data: {
+                labels: catNames,
+                datasets: [{ data: categories.map(c => c.total), backgroundColor: catNames.map(n => colorMap[n]), borderWidth: 1 }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    datalabels: {
+                        color: '#fff',
+                        font: { weight: 'bold', size: 12 },
+                        formatter: (value) => {
+                            const pct = value / totalAll * 100;
+                            return pct >= 6 ? Math.round(pct) + '%' : '';
+                        },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ' ' + ctx.label + ': ' + fmt(ctx.raw) +
+                                          ' (' + (ctx.raw / totalAll * 100).toFixed(1) + '%)'
+                        }
+                    }
+                }
+            }
+        });
+
+        // ── 5. leaderboard ─────────────────────────────────────────────────
+        const board = document.getElementById('leaderboard');
+        categories.forEach((c, i) => {
+            const pct   = totalAll > 0 ? c.total / totalAll * 100 : 0;
+            const color = colorMap[c.category];
+            const div   = document.createElement('div');
+            div.className = 'flex items-center gap-3';
+            div.innerHTML = `
+                <span class="text-xs font-mono text-gray-400 w-5 text-right">${i+1}</span>
+                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${color}"></span>
+                <span class="w-28 text-sm font-medium truncate">${c.category}</span>
+                <div class="flex-1 bg-gray-100 rounded-full h-2">
+                    <div class="h-2 rounded-full transition-all" style="width:${pct.toFixed(1)}%;background:${color}"></div>
+                </div>
+                <span class="text-sm font-bold text-gray-700 w-12 text-right">${pct.toFixed(1)}%</span>
+                <span class="text-xs text-gray-400 w-32 text-right">${fmt(c.total)}</span>`;
+            board.appendChild(div);
+        });
+
+    } catch (err) {
+        console.error('dashboard error:', err);
+    }
+}
+loadDashboard();
+</script>
+{{end}}
