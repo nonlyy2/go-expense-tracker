@@ -3,7 +3,7 @@
     <h2 class="text-lg font-bold mb-4">New Expense</h2>
     <form hx-post="/expenses"
           hx-target="#expense-list"
-          hx-swap="afterbegin"
+          hx-swap="outerHTML"
           hx-on::after-request="if(event.detail.successful) this.reset()">
         <div class="mb-4">
             <label class="block text-gray-700 text-sm font-bold mb-2">Amount</label>
