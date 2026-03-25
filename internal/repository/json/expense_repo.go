@@ -114,6 +114,21 @@ func (r *expenseRepo) Update(ctx context.Context, expense *domain.Expense) error
 	return domain.ErrNotFound
 }
 
+// GetMonthlyStats is not supported by the JSON backend — stats require SQL aggregation.
+func (r *expenseRepo) GetMonthlyStats(_ context.Context, _ int) ([]domain.MonthlyStat, error) {
+	return nil, nil
+}
+
+// GetCategoryStats is not supported by the JSON backend — stats require SQL aggregation.
+func (r *expenseRepo) GetCategoryStats(_ context.Context, _ int) ([]domain.CategoryStat, error) {
+	return nil, nil
+}
+
+// GetMonthlyCategoryStats is not supported by the JSON backend — stats require SQL aggregation.
+func (r *expenseRepo) GetMonthlyCategoryStats(_ context.Context, _ int) ([]domain.MonthCategoryStat, error) {
+	return nil, nil
+}
+
 func (r *expenseRepo) Delete(ctx context.Context, id int, userID int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
