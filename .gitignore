@@ -24,3 +24,6 @@ expenses.json
 # OS specific files
 .DS_Store
 **/.DS_Store
+
+#.env file
+.env

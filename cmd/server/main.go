@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/joho/godotenv"
+
 	"go-expense-tracker/internal/config"
 	"go-expense-tracker/internal/handler"
 	"go-expense-tracker/internal/middleware"
@@ -14,6 +16,9 @@ import (
 )
 
 func main() {
+	// load .env if present (no error if missing — prod uses real env vars)
+	godotenv.Load()
+
 	fmt.Println("Starting Expense Tracker...")
 
 	cfg := config.LoadConfig()
